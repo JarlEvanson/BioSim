@@ -3,7 +3,7 @@
 extern crate rand;
 
 mod windowed;
-use std::thread::{sleep};
+use std::{thread::{sleep}, ops::Deref, fmt::Write};
 
 use rand::Rng;
 use windowed::window::Window;
@@ -18,38 +18,52 @@ mod cell;
 use cell::Cell;
 
 mod gene;
-use gene::Gene;
+use gene::{Gene, UNIQUE_INNER_NODES, UNIQUE_INPUT_NODES, UNIQUE_OUTPUT_NODES};
 
 use crate::{gene::NodeID, windowed::window::wait};
 mod neuron;
 
-const WIDTH: u32 = 100;
-const HEIGHT: u32 = 100;
-const GENOME_LENGTH: u32 = 6;
+const GRID_WIDTH: u32 = 200;
+const GRID_HEIGHT: u32 = 200;
+const GENOME_LENGTH: u32 = 10;
 const PARENT_VARIATION: f32 = 0.20;
 const MUTATION_RATE: f32 = 0.01;
-const POPULATION_SIZE: u32 = 1000;
+const POPULATION_SIZE: u32 = 4000;
 const STEPS_PER_GEN: u32 = 250;
+const NEURON_COUNT: usize = (UNIQUE_INNER_NODES + UNIQUE_INPUT_NODES + UNIQUE_OUTPUT_NODES) as usize;
 
 static mut steps: u32 = 0;
 static mut should_reset: bool = false;
 static mut pause: bool = false;
 
-static mut rand_mutations: u32 = 0;
+static mut neuron_presence: [u32; NEURON_COUNT] = [0; NEURON_COUNT];
+static mut framebuffer_width: u32 = 0;
+static mut framebuffer_height: u32 = 0;
+static mut grid_display_width: u32 = 0;
 
 static mut grid_ptr: *const Grid = 0 as *const Grid;
+static mut pop_ptr: *const Population = 0 as *const Population;
+
+static mut accounted_time: f64 = 0.0;
 
 fn main() {
     const windowing: bool = true;
     if windowing {
         let window = Window::createWindow(512, 512).expect("Window failed to be created");
+        unsafe {
+            framebuffer_width = 512;
+            framebuffer_height = 512;
+            grid_display_width = 512;
+        }
         window.make_current();
 
-        let mut grid = Grid::new(WIDTH, HEIGHT);
+        let mut grid = Grid::new(GRID_WIDTH, GRID_HEIGHT);
 
         unsafe { grid_ptr = &grid; }
 
         let mut current_population = Population::new(POPULATION_SIZE);
+
+        unsafe { pop_ptr = &current_population; }
 
         current_population.assign_random(&mut grid);
 
@@ -57,46 +71,37 @@ fn main() {
         
         window.render(current_population.get_living_cells());
 
-        let mut accounted_time = 0.0;
+        unsafe { accounted_time = glfw::ffi::glfwGetTime(); }
 
         let mut generation = 0;
-
 
         while !window.shouldClose() {
             window.poll();
             if unsafe { should_reset } {
+                unsafe { accounted_time = glfw::ffi::glfwGetTime(); }
                 unsafe { steps = 0; }
                 generation = 0;
 
                 current_population.gen_random();
 
-                current_population.assign_random(&mut grid);
-
-                println!("Generation 0:");
-                
                 unsafe { should_reset = false; }
             }
 
-            if unsafe { steps == STEPS_PER_GEN } {
-                unsafe {
-                    steps = 0;
-                    generation += 1;
+            if unsafe { steps == 0 } {
+                let mut path = String::from("saves\\gen");
+                path.push_str(&generation.to_string());
+                save_to_file(&path);
 
-                    grid.reset();
-                    current_population.assign_random(&mut grid);
+                grid.reset();
+                current_population.assign_random(&mut grid);
 
-                    window.render(current_population.get_living_cells());
+                window.render(current_population.get_living_cells());
 
-                    println!("Generation {}:", generation);
-
-                    //wait(&window, 3.0);
-
-                    //accounted_time += 3.0;
-                }
+                println!("Generation {}:", generation);
             }
 
             if unsafe { glfw::ffi::glfwGetTime() - accounted_time > 0.016 && !pause } {
-                //accounted_time += 0.016;
+                unsafe { accounted_time += 0.016; }
 
                 unsafe { steps += 1; };
 
@@ -116,27 +121,27 @@ fn main() {
             }
 
             if unsafe { steps == STEPS_PER_GEN } {
+
                 let reproducers = determine_reproducers(&current_population);
                 if reproducers.len() == 0 {
                     println!("Failed to produce viable offspring");
                     loop {
                         window.poll();
                         if window.shouldClose() || unsafe { should_reset } {
-                            accounted_time = unsafe { glfw::ffi::glfwGetTime() };
+                            unsafe { accounted_time =  glfw::ffi::glfwGetTime() };
                             break;
                         }
                     }
                     continue;
                 }
 
-                println!("Killed: {}\tReproducing: {}\tLiving Non-reproducing: {} MoveRandom: {}", 
+                println!("Dead: {:3}\tReproducing: {:3}\tLiving Non-reproducing: {:3}", 
                     POPULATION_SIZE - current_population.get_living_indices().len() as u32, 
                     reproducers.len(),
                     current_population.get_living_indices().len() - reproducers.len(),
-                    unsafe { rand_mutations }
                 );
 
-                unsafe { rand_mutations = 0; }
+                wait(&window, 2.0);
 
                 current_population = {
                     let mut reproducing_cells = Vec::new();
@@ -146,10 +151,9 @@ fn main() {
 
                     Population::new_asexually(POPULATION_SIZE, &reproducing_cells)
                 };
-
-                //wait(&window, 3.0);
-
-                accounted_time += 3.0;
+                
+                unsafe { steps = 0 };
+                generation += 1;
             }
         } 
     }
@@ -158,7 +162,7 @@ fn main() {
 pub fn determine_reproducers(pop: &Population) -> Vec<usize> {
     let mut reproducers = Vec::new();
     for cell in pop.get_living_cells() {
-        if cell.get_coords().0 < WIDTH / 4 || cell.get_coords().0 > 3 * WIDTH / 4 {
+        if cell.get_coords().0 < GRID_WIDTH / 4 || cell.get_coords().0 > 3 * GRID_WIDTH / 4 {
             reproducers.push(cell.get_index());
         } 
     }
@@ -171,9 +175,43 @@ pub fn determine_deaths(pop: &mut Population) {
         for index in &pop.get_living_indices() {
             let (x, y) = pop.get_cell(*index).get_coords();
 
-            if x < WIDTH / 4 || x > 3 * WIDTH / 4 {
+            if x < GRID_WIDTH / 4 || x > 3 * GRID_WIDTH / 4 {
+                pop.add_to_death_queue(*index as u32)
+            }
+        }
+    } /* else if unsafe { steps } == STEPS_PER_GEN / 2 {
+        for index in &pop.get_living_indices() {
+            let (x, y) = pop.get_cell(*index).get_coords();
+
+            if x > GRID_WIDTH / 4 && x < 3 * GRID_WIDTH / 4 {
+                pop.add_to_death_queue(*index as u32)
+            }
+        }
+    } else if unsafe { steps } == 3 * STEPS_PER_GEN / 4 {
+        for index in &pop.get_living_indices() {
+            let (x, y) = pop.get_cell(*index).get_coords();
+
+            if x < GRID_WIDTH / 4 || x > 3 * GRID_WIDTH / 4 {
                 pop.add_to_death_queue(*index as u32)
             }
         }
     }
+    if pop.get_death_queue_len() > 0 {
+        println!("Killed: {}", pop.get_death_queue_len());
+    } */
+}
+
+pub fn save_to_file(path: &str) {
+    let mut file = std::fs::File::create(path).expect("Failed to create file");
+
+    let mut string = String::new();
+
+    for cell in (unsafe { (*pop_ptr).get_all_cells() }).deref() {
+        for gene in cell.get_genome().deref() {
+            write!(string, "{:08x}", gene.gene);
+        }
+        write!(string, "\n");
+    }
+
+    std::io::Write::write(&mut file, string.as_bytes());
 }

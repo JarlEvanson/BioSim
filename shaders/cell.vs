@@ -10,7 +10,7 @@ uniform int width;
 uniform int height;
 
 void main() {
-    outColor = vec3(0.0, 1.0, 0.0);//color;
+    outColor = color;
 
 
     gl_Position = vec4(

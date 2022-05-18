@@ -1,8 +1,10 @@
+#![allow(temporary_cstring_as_ptr)]
+
 use std::{os::raw::c_char, ffi::CString};
 
-use glfw::with_c_str;
+extern crate glfw;
 
-use crate::{windowed::shader::Shader, grid::Grid, cell::Cell, WIDTH, HEIGHT, should_reset, pause};
+use crate::{windowed::shader::Shader, grid::{Grid, self}, cell::Cell, GRID_WIDTH, GRID_HEIGHT, should_reset, pause, neuron_presence, gene::NodeID, grid_display_width, grid_ptr, pop_ptr, accounted_time};
 
 pub struct Window {
     ptr: *mut glfw::ffi::GLFWwindow,
@@ -43,6 +45,8 @@ impl Window {
             glfw::ffi::glfwSetFramebufferSizeCallback(ptr, Some(framebufferSizeCallback));
 
             glfw::ffi::glfwSetKeyCallback(ptr, Some(keyCallback));
+
+            glfw::ffi::glfwSetMouseButtonCallback(ptr, Some(mouseButtonCallback));
 
             ptr
         };
@@ -167,7 +171,7 @@ impl Window {
             gl::BindVertexArray(self.background_VAO);
             
             self.background_shader.apply();
-            self.vertical_shader.set_uniform_vec3("color", 1.0, 1.0, 1.0);
+            self.background_shader.set_uniform_vec3("color", 1.0, 1.0, 1.0);
 
             gl::DrawArrays(gl::TRIANGLES, 0, 6);
 
@@ -196,8 +200,11 @@ impl Window {
                 ];
 
                 for cell in &living_cells {
-                    buffer.push((cell.get_coords().0 as f32) / (WIDTH as f32) * 2.0 - 1.0);
-                    buffer.push((cell.get_coords().1 as f32 + 1.0) / (HEIGHT as f32) * 2.0 - 1.0);
+                    buffer.push( ((cell.get_coords().0) as f32) / (GRID_WIDTH as f32) * 2.0 - 1.0);
+                    buffer.push( ((cell.get_coords().1 + 1) as f32 ) / (GRID_HEIGHT as f32) * 2.0 - 1.0);
+                    buffer.push( ( cell.get_color().0 as f32 / 255.0) );
+                    buffer.push( ( cell.get_color().1 as f32 / 255.0) );
+                    buffer.push( ( cell.get_color().2 as f32 / 255.0) );
                 }
 
                 gl::BufferData(gl::ARRAY_BUFFER, (buffer.len() * 4) as isize, buffer.as_ptr() as *const std::ffi::c_void, gl::STATIC_DRAW);
@@ -206,12 +213,16 @@ impl Window {
                 gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, 2 * 4, 0 as *const std::ffi::c_void);
 
                 gl::EnableVertexAttribArray(1);
-                gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, 2 * 4, (12 * 4) as *const std::ffi::c_void);
+                gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, 5 * 4, (12 * 4) as *const std::ffi::c_void);
                 gl::VertexAttribDivisor(1, 1);
 
+                gl::EnableVertexAttribArray(2);
+                gl::VertexAttribPointer(2, 3, gl::FLOAT, gl::FALSE, 5 * 4, (14 * 4) as *const std::ffi::c_void);
+                gl::VertexAttribDivisor(2, 1);
+
                 self.cell_shader.apply();
-                self.cell_shader.set_uniform_int("width", WIDTH as i32);
-                self.cell_shader.set_uniform_int("height", HEIGHT as i32);
+                self.cell_shader.set_uniform_int("width", GRID_WIDTH as i32);
+                self.cell_shader.set_uniform_int("height", GRID_HEIGHT as i32);
 
                 gl::DrawArraysInstanced(gl::TRIANGLES, 0, 6, living_cells.len() as i32);
 
@@ -223,11 +234,13 @@ impl Window {
 
             self.horizontal_shader.apply();
             self.horizontal_shader.set_uniform_vec3("color", 0.0, 0.0, 0.0);
-            gl::DrawArraysInstanced(gl::LINES, 0, 2, 100);
+            self.horizontal_shader.set_uniform_int("height", GRID_HEIGHT as i32);
+            gl::DrawArraysInstanced(gl::LINES, 0, 2, GRID_HEIGHT as i32);
 
             self.vertical_shader.apply();
             self.vertical_shader.set_uniform_vec3("color", 0.0, 0.0, 0.0);
-            gl::DrawArraysInstanced(gl::LINES, 0, 2, 100);
+            self.vertical_shader.set_uniform_int("width", GRID_WIDTH as i32);
+            gl::DrawArraysInstanced(gl::LINES, 0, 2, GRID_HEIGHT as i32);
             
 
             glfw::ffi::glfwSwapBuffers(self.ptr);
@@ -272,35 +285,83 @@ extern "C" fn windowCloseCallback(window: *mut glfw::ffi::GLFWwindow) {
 
 extern "C" fn framebufferSizeCallback(window: *mut glfw::ffi::GLFWwindow, width: i32, height: i32) {
     unsafe {
+        crate::framebuffer_width = width as u32;
+        crate::framebuffer_height = height as u32;
         if width > height {
-            gl::Viewport((width - height) / 2, 0, height, height);
+            gl::Viewport(0, 0, height, height);
+            crate::grid_display_width = height as u32;
         } else if height >= width {
             gl::Viewport(0, (height - width) / 2, width, width);
+            crate::grid_display_width = width as u32;
         }
     }
 }
 
 extern "C" fn keyCallback(window: *mut glfw::ffi::GLFWwindow, key: i32, scancode: i32, action: i32, mods: i32) {
-    if key == glfw::ffi::KEY_R {
+    if key == glfw::ffi::KEY_R && action == glfw::ffi::PRESS {
         unsafe { should_reset = true; }
     } else if key == glfw::ffi::KEY_SPACE && action == glfw::ffi::PRESS {
         unsafe { pause = !pause; }
+    } else if key == glfw::ffi::KEY_E && action == glfw::ffi::PRESS {
+        print!("\nNeuron Frequencies: \n");
+        unsafe {
+            for index in 0 .. neuron_presence.len() {
+                println!("{}: {}", NodeID::from_index(index), neuron_presence[index]);
+            }
+            println!("");
+        }
+    } else if key == glfw::ffi::KEY_ESCAPE {
+        unsafe { 
+            glfw::ffi::glfwSetWindowShouldClose(window, glfw::ffi::TRUE) 
+        };
+    }
+}
+
+extern "C" fn mouseButtonCallback(window: *mut glfw::ffi::GLFWwindow, button: i32, action: i32, mods: i32) {
+    unsafe {
+        if action == glfw::ffi::PRESS {
+            let (mut x, mut y) = (0.0, 0.0);
+            glfw::ffi::glfwGetCursorPos(window, &mut x, &mut y);
+
+            if x as u32 <= crate::grid_display_width && y as u32 <= crate::grid_display_width {
+
+                let cell_x = ((x as f32 / (grid_display_width as f32)) * GRID_WIDTH as f32) as u32;
+                let cell_y = (((crate::grid_display_width - y as u32) as f32 / (grid_display_width as f32)) * GRID_HEIGHT  as f32) as u32;
+                let cell_index = (*grid_ptr).get_occupant(cell_x, cell_y);
+
+                if cell_index != None {
+                    println!("{:#?}", (*pop_ptr).get_cell(cell_index.unwrap_unchecked() as usize));
+                }
+
+                let cell_indices = (*grid_ptr).get_in_radius((cell_x, cell_y), 2.0);
+                println!("Cells Found: {}\nCell Locations", cell_indices.len());
+            
+            }
+
+            
+        }
     }
 }
 
 
+
 fn loadfn(symbol: &'static str) -> glfw::ffi::GLFWglproc {
-    with_c_str(symbol, |procname| unsafe {
+    glfw::with_c_str(symbol, |procname| unsafe {
         glfw::ffi::glfwGetProcAddress(procname)
     })
 }
 
 pub fn wait(window: &Window, secs: f64) {
-    let time = unsafe { glfw::ffi::glfwGetTime() };
-    while unsafe { glfw::ffi::glfwGetTime() } - time < secs {
+    
+    while unsafe { glfw::ffi::glfwGetTime() } - unsafe { accounted_time } < secs {
         window.poll();
         if window.shouldClose() {
             break;
         }  
+        if unsafe { pause } {
+            unsafe { accounted_time = glfw::ffi::glfwGetTime(); }
+        }
     }
+
+    unsafe { accounted_time += secs; }
 }

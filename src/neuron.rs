@@ -1,8 +1,8 @@
 use std::fmt::{Debug, write};
 use std::ops::Deref;
 
-use crate::gene::{Gene, NodeID};
-use crate::{GENOME_LENGTH, WIDTH, rand_mutations};
+use crate::gene::{Gene, NodeID, UNIQUE_OUTPUT_NODES};
+use crate::{GENOME_LENGTH, GRID_WIDTH, neuron_presence};
 
 use rand::{thread_rng, Rng};
 
@@ -44,13 +44,17 @@ impl NeuralNet {
             }
             if !tail_already_added {
                 neurons.push(Neuron { variant: gene.get_tail_node_id(), value: 0.0 });
-                if gene.get_tail_node_id() == NodeID::MoveRandom { unsafe { rand_mutations += 1 } };
                 tail_index = neurons.len() - 1;
             }
 
-
             connections.push( Connection { input: head_index, output: tail_index, weight: gene.get_weight() } );
 
+        }
+
+        for index in 0 .. neurons.len() {
+            unsafe {
+                neuron_presence[neurons[index].variant.get_index()] += 1;
+            }
         }
 
         let connections = {
@@ -81,6 +85,12 @@ impl NeuralNet {
         let mut sorted_connections = Vec::new();
 
         for index in 0..connections.len() {
+            if neurons[connections[index].input].variant.is_input() && neurons[connections[index].output as usize].variant.is_output() {
+                sorted_connections.push(connections[index]);
+            }
+        }
+
+        for index in 0..connections.len() {
             if neurons[connections[index].input as usize].variant.is_input() && neurons[connections[index].output as usize].variant.is_inner() {
                 sorted_connections.push(connections[index]);
             }
@@ -88,12 +98,6 @@ impl NeuralNet {
 
         for index in 0..connections.len() {
             if neurons[connections[index].input as usize].variant.is_inner() && neurons[connections[index].output as usize].variant.is_inner() {
-                sorted_connections.push(connections[index]);
-            }
-        }
-
-        for index in 0..connections.len() {
-            if neurons[connections[index].input].variant.is_input() && neurons[connections[index].output as usize].variant.is_output() {
                 sorted_connections.push(connections[index]);
             }
         }
@@ -114,9 +118,10 @@ impl NeuralNet {
     pub fn feed_forward(&mut self, sensor_values: &Vec<f32>) {
         for neuron in self.neurons.as_mut() {
             match neuron.variant {
-                NodeID::DistX => { neuron.value = sensor_values[0] },
-                NodeID::DistY => { neuron.value = sensor_values[1] },
-                NodeID::Age => { neuron.value = sensor_values[2] },
+                NodeID::DistX => { neuron.value = sensor_values[NodeID::DistX.get_input_index()] },
+                NodeID::DistY => { neuron.value = sensor_values[NodeID::DistY.get_input_index()] },
+                NodeID::Age => { neuron.value = sensor_values[NodeID::Age.get_input_index()] },
+                NodeID::Oscillator => { neuron.value = sensor_values[NodeID::Oscillator.get_input_index()] }
                 _ => {  }
             }
         }
@@ -153,18 +158,11 @@ impl NeuralNet {
     }
 
     pub fn get_outputs(&self) -> Vec<f32> {
-        let mut outputs = vec![0.0; 7];
+        let mut outputs = vec![0.0; UNIQUE_OUTPUT_NODES as usize];
 
         for neuron in self.neurons.deref() {
-            match neuron.variant {
-                NodeID::MoveX => { outputs[0] = neuron.value },
-                NodeID::MoveY => { outputs[1] = neuron.value },
-                NodeID::MoveEast => { outputs[2] = neuron.value },
-                NodeID::MoveWest => { outputs[3] = neuron.value },
-                NodeID::MoveNorth => { outputs[4] = neuron.value },
-                NodeID::MoveSouth => { outputs[5] = neuron.value },
-                NodeID::MoveRandom => { outputs[6] = neuron.value },
-                _ => {  }
+            if neuron.variant.is_output() {
+                outputs[NodeID::get_output_index(&neuron.variant)] = neuron.value;
             }
         }
 

@@ -1,8 +1,8 @@
-use std::ops::Deref;
+use std::{ops::Deref, convert::TryInto};
 
 use rand::Rng;
 
-use crate::{cell::Cell, POPULATION_SIZE, grid::Grid};
+use crate::{cell::{Cell, DIR}, POPULATION_SIZE, grid::Grid, NEURON_COUNT, neuron_presence};
 
 
 
@@ -18,7 +18,35 @@ impl Population {
     pub fn new_asexually(size: u32, reproducing_cells: &Vec<&Cell>) -> Population {
         let mut cells = Vec::with_capacity(size.try_into().unwrap());
 
-        if reproducing_cells.len() > 2 {
+        unsafe {
+            for index in 0 .. NEURON_COUNT {
+                neuron_presence[index] = 0;
+            }
+        }
+
+        if reproducing_cells.len() > 1 {
+            for index in 0 .. size {
+                cells.push( Cell::asexually_reproduce( reproducing_cells[rand::thread_rng().gen_range(0 .. reproducing_cells.len())], index as usize));
+            }
+        } else {
+            for index in 0 .. size {
+                cells.push(Cell::asexually_reproduce( reproducing_cells[0], index as usize));
+            }
+        }
+
+        Population { size, cells: cells.into_boxed_slice(), death_queue: Vec::new(), move_queue: Vec::new() }
+    }
+
+    pub fn new_sexually(size: u32, reproducing_cells: &Vec<&Cell>) -> Population {
+        let mut cells = Vec::with_capacity(size.try_into().unwrap());
+
+        unsafe {
+            for index in 0 .. NEURON_COUNT {
+                neuron_presence[index] = 0;
+            }
+        }
+
+        if reproducing_cells.len() > 1 {
             for index in 0 .. size {
                 cells.push( Cell::asexually_reproduce( reproducing_cells[rand::thread_rng().gen_range(0 .. reproducing_cells.len())], index as usize));
             }
@@ -34,17 +62,32 @@ impl Population {
     pub fn new(size: u32) -> Population {
         let mut cells = Vec::with_capacity(size.try_into().unwrap());
 
+        unsafe {
+            for index in 0 .. NEURON_COUNT {
+                neuron_presence[index] = 0;
+            }
+        }
+
         for index in 0 .. size {
-            cells.push(Cell::random_new((0, 0), index as usize));
+            cells.push(Cell::random_new(index as usize));
         }
 
         Population { size, cells: cells.into_boxed_slice(), death_queue: Vec::new(), move_queue: Vec::new() }
     }
 
     pub fn gen_random(&mut self) {
-        for index in 0 .. self.size {
-            self.cells[index as usize] = Cell::random_new((0, 0), index as usize);
+        unsafe { 
+            for index in 0 .. NEURON_COUNT {
+                neuron_presence[index] = 0;
+            }
         }
+        for index in 0 .. self.size {
+            self.cells[index as usize] = Cell::random_new(index as usize);
+        }
+    }
+
+    pub fn get_all_cells(&self) -> &Box<[Cell]> {
+        &self.cells
     }
 
     pub fn resolve_dead(&mut self, grid: &mut Grid) {
@@ -118,14 +161,24 @@ impl Population {
                 if (grid.get_occupant(x, y) == None) {
                     grid.set_occupant(cell.get_coords().0, cell.get_coords().1, None);
                     grid.set_occupant(x, y, Some(cell.get_index() as u32));
+
+                    cell.set_last_dir(DIR::get_dir_from_offset((x as i32 - (cell.x as i32), y as i32 - (cell.y as i32))));
+
                     cell.set_coords((x, y));
                 } else if (grid.get_occupant(x, cell.y) == None ) {
                     grid.set_occupant(cell.get_coords().0, cell.get_coords().1, None);
                     grid.set_occupant(x, cell.y, Some(cell.get_index() as u32));
+
+                    cell.set_last_dir(DIR::get_dir_from_offset((x as i32 - (cell.x as i32), 0)));
+
                     cell.set_coords((x, cell.y));
                 } else if (grid.get_occupant(cell.x, y) == None ) {
+                    
                     grid.set_occupant(cell.get_coords().0, cell.get_coords().1, None);
                     grid.set_occupant(cell.x, y, Some(cell.get_index() as u32));
+                    
+                    cell.set_last_dir(DIR::get_dir_from_offset((0, y as i32 - (cell.y as i32))));
+
                     cell.set_coords((cell.x, y));
                 }
             }
@@ -134,5 +187,7 @@ impl Population {
         self.move_queue.clear();
     }
 
-
+    pub fn get_death_queue_len(&self) -> usize {
+        self.death_queue.len()
+    }
 }

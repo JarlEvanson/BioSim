@@ -22,6 +22,37 @@ impl Grid {
         self.grid[(x + y * self.width) as usize] = cell;
     }
 
+    pub fn get_in_radius(&self, coords: (u32, u32), radius: f32) -> Vec<u32> {
+        println!("Center: ({}, {})", coords.0, coords.1);
+        let top = (coords.1 as f32 + radius) as u32;
+        let bottom = (coords.1 as f32 - radius) as u32;
+
+        let mut in_radius = Vec::new();
+
+        let mut cy = bottom;
+        while cy <= top {
+            let dy = cy.saturating_sub(coords.1);
+            let dx = (radius * radius - (dy * dy) as f32).sqrt();
+
+            let left = (coords.0 as f32 - dx).ceil() as u32;
+            let right = (coords.0 as f32 + dx).ceil() as u32;
+
+            let mut cx = left;
+            while cx <= right {
+                let occupant = self.grid[(cx + cy * self.width) as usize];
+                if occupant != None {
+                    in_radius.push(unsafe { occupant.unwrap_unchecked() });
+                }
+                cx += 1;
+            }
+
+
+            cy += 1;
+        }
+
+        in_radius
+    }
+
     pub fn reset(&mut self) {
         self.grid.fill_with(|| None);
     }
