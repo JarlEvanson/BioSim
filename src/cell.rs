@@ -2,7 +2,7 @@ use std::{f32::consts::E, convert::TryInto};
 
 use rand::{thread_rng, Rng};
 
-use crate::{gene::{Gene, NodeID, NodeType}, GENOME_LENGTH, PARENT_VARIATION, MUTATION_RATE, neuron::NeuralNet, GRID_HEIGHT, GRID_WIDTH, steps, STEPS_PER_GEN};
+use crate::{gene::{Gene, NodeID, NodeType}, genome_length, MUTATION_RATE, neuron::NeuralNet, GRID_HEIGHT, GRID_WIDTH, steps, steps_per_gen};
 
 
 #[derive(Debug)]
@@ -22,7 +22,7 @@ impl Cell {
     pub fn random_new(index: usize) -> Cell {
         let mut genome = Vec::new();
 
-        for gene in 0 .. GENOME_LENGTH {
+        for gene in 0 .. unsafe { genome_length } {
             genome.push(Gene::new(thread_rng().gen()));
         }   
 
@@ -37,10 +37,10 @@ impl Cell {
     }
 
     pub fn sexually_reproduce(cell1: &Cell, cell2: &Cell, index: usize) -> Cell {
-        let mut new_genes = Vec::with_capacity(GENOME_LENGTH.try_into().unwrap());
+        let mut new_genes = Vec::with_capacity(unsafe { genome_length }.try_into().unwrap());
 
 
-        for i in 0 .. GENOME_LENGTH {
+        for i in 0 .. unsafe { genome_length } {
             //If true, then first cell contributes
             //If false, then second cell contributes
             if thread_rng().gen_bool(0.5) {
@@ -70,7 +70,7 @@ impl Cell {
 
         let mut new_genes = cell.genome.clone();
 
-        for i in 0 .. GENOME_LENGTH {
+        for i in 0 .. unsafe { genome_length } {
             if thread_rng().gen_range(0.0 as f32 .. 100.0) < unsafe { MUTATION_RATE } {
                 let bit = thread_rng().gen_range(0 .. 32 as u32);
                 unsafe {
@@ -86,7 +86,7 @@ impl Cell {
         self.neural_net.feed_forward(&vec![
             (2 * self.x) as f32 / (GRID_WIDTH as f32) - 1.0, 
             (2 * self.y) as f32 / (GRID_HEIGHT as f32) - 1.0, 
-            unsafe { (steps as f32) / (STEPS_PER_GEN as f32) },
+            unsafe { (steps as f32) / (steps_per_gen as f32) },
             ((unsafe { steps } / self.oscillator_period) % 2) as f32
          ]);
 
@@ -174,14 +174,14 @@ impl Cell {
         const maxLumaVal: u32 = 0xb0;
 
         let mut color = unsafe {
-            let c: u32 = (genome.len() & 1) as u32 |
-                (u32::from((genome.first().unwrap_unchecked().get_head_type() == NodeType::INPUT)) << 1) |
-                (u32::from((genome.last().unwrap_unchecked().get_head_type() == NodeType::INPUT)) << 2) |
-                (u32::from((genome.first().unwrap_unchecked().get_tail_type() == NodeType::INNER)) << 3) |
-                (u32::from((genome.last().unwrap_unchecked().get_tail_type() == NodeType::INNER)) << 4) |
-                (((genome.first().unwrap_unchecked().get_head_node_id().get_index() & 1) as u32) << 5) |
-                (((genome.first().unwrap_unchecked().get_tail_node_id().get_index() & 1) as u32) << 6) |
-                (((genome.last().unwrap_unchecked().get_head_node_id().get_index() & 1) as u32) << 7);
+            let c: u32 = u32::from((genome.first().unwrap().get_head_type() == NodeType::INPUT)) |
+                (u32::from((genome.last().unwrap().get_head_type() == NodeType::INPUT)) << 1) |
+                (u32::from((genome.first().unwrap().get_tail_type() == NodeType::INNER)) << 2) |
+                (u32::from((genome.last().unwrap().get_tail_type() == NodeType::INNER)) << 3) |
+                (((genome.first().unwrap().get_head_node_id().get_index() & 1) as u32) << 4) |
+                (((genome.first().unwrap().get_tail_node_id().get_index() & 1) as u32) << 5) |
+                (((genome.last().unwrap().get_head_node_id().get_index() & 1) as u32) << 6) |
+                (((genome.last().unwrap().get_tail_node_id().get_index() & 1) as u32) << 7);
                 
             (c, ((c & 0x1f) << 3), ((c & 7) << 5))
         };

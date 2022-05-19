@@ -2,7 +2,7 @@ use std::fmt::{Debug, write};
 use std::ops::Deref;
 
 use crate::gene::{Gene, NodeID, UNIQUE_OUTPUT_NODES};
-use crate::{GENOME_LENGTH, GRID_WIDTH, neuron_presence};
+use crate::{genome_length, GRID_WIDTH, neuron_presence};
 
 use rand::{thread_rng, Rng};
 

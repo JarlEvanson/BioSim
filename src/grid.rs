@@ -41,7 +41,7 @@ impl Grid {
             while cx <= right {
                 let occupant = self.grid[(cx + cy * self.width) as usize];
                 if occupant != None {
-                    in_radius.push(unsafe { occupant.unwrap_unchecked() });
+                    in_radius.push(unsafe { occupant.unwrap() });
                 }
                 cx += 1;
             }

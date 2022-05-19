@@ -2,7 +2,7 @@ use std::{ops::Deref, convert::TryInto};
 
 use rand::Rng;
 
-use crate::{cell::{Cell, DIR}, POPULATION_SIZE, grid::Grid, NEURON_COUNT, neuron_presence};
+use crate::{cell::{Cell, DIR}, population_size, grid::Grid, NEURON_COUNT, neuron_presence};
 
 
 
@@ -73,6 +73,10 @@ impl Population {
         }
 
         Population { size, cells: cells.into_boxed_slice(), death_queue: Vec::new(), move_queue: Vec::new() }
+    }
+
+    pub fn new_with_cells(size: u32, cells: Box<[Cell]>) -> Population {
+        Population { size, cells, death_queue: Vec::new(), move_queue: Vec::new() }
     }
 
     pub fn gen_random(&mut self) {

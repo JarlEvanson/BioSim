@@ -2,6 +2,8 @@
 
 use std::{os::raw::c_char, ffi::CString};
 
+use crate::generation;
+
 extern crate glfw;
 
 use crate::{windowed::shader::Shader, grid::{Grid, self}, cell::Cell, GRID_WIDTH, GRID_HEIGHT, should_reset, pause, neuron_presence, gene::NodeID, grid_display_width, grid_ptr, pop_ptr, accounted_time};
@@ -314,6 +316,10 @@ extern "C" fn keyCallback(window: *mut glfw::ffi::GLFWwindow, key: i32, scancode
         unsafe { 
             glfw::ffi::glfwSetWindowShouldClose(window, glfw::ffi::TRUE) 
         };
+    } else if key == glfw::ffi::KEY_S && action == glfw::ffi::PRESS {
+        let mut path = String::from("saves\\gen");
+        path.push_str(unsafe { &generation.to_string() });
+        crate::save_to_file(&path);
     }
 }
 
@@ -330,7 +336,7 @@ extern "C" fn mouseButtonCallback(window: *mut glfw::ffi::GLFWwindow, button: i3
                 let cell_index = (*grid_ptr).get_occupant(cell_x, cell_y);
 
                 if cell_index != None {
-                    println!("{:#?}", (*pop_ptr).get_cell(cell_index.unwrap_unchecked() as usize));
+                    println!("{:#?}", (*pop_ptr).get_cell(cell_index.unwrap() as usize));
                 }
 
                 let cell_indices = (*grid_ptr).get_in_radius((cell_x, cell_y), 2.0);
