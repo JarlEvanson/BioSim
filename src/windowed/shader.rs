@@ -1,14 +1,11 @@
 use std::io::Read;
 
-
-
 pub struct Shader {
     ID: u32
 }
 
 impl Shader {
-    pub fn new(vertexPath: &str, fragmentPath: &str) -> Shader {
-        println!("Loading shader of {} and {}", vertexPath, fragmentPath);        
+    pub fn new(vertexPath: &str, fragmentPath: &str) -> Shader {      
 
         let mut vertexFile = std::fs::File::open(vertexPath).expect("Failed to open Vertex Shader File");
         let mut fragmentFile = std::fs::File::open(fragmentPath).expect("Failed to open Fragment Shader File");

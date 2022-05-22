@@ -1,16 +1,17 @@
 #![allow(temporary_cstring_as_ptr)]
 
+use std::path::PathBuf;
 use std::{os::raw::c_char, ffi::CString};
 
 use crate::generation;
 
 extern crate glfw;
 
-use crate::{windowed::shader::Shader, grid::{Grid, self}, cell::Cell, GRID_WIDTH, GRID_HEIGHT, should_reset, pause, neuron_presence, gene::NodeID, grid_display_width, grid_ptr, pop_ptr, accounted_time};
+use crate::{windowed::shader::Shader, grid::{Grid, self}, cell::Cell, grid_width, grid_height, should_reset, pause, neuron_presence, gene::NodeID, grid_display_side_length, grid_ptr, pop_ptr, accounted_time};
 
+#[repr(C)]
 pub struct Window {
     ptr: *mut glfw::ffi::GLFWwindow,
-    line_VAO: u32,
     background_VAO: u32,
     cell_VAO: u32,
     vertical_shader: Shader,
@@ -59,7 +60,6 @@ impl Window {
         let cell = Shader::new("shaders/cell.vs", "shaders/cell.fs");
 
         let mut window = Window { ptr: ptr, 
-            line_VAO: 0, 
             background_VAO: 0,
             cell_VAO: 0,
             horizontal_shader: horizontal, 
@@ -68,37 +68,9 @@ impl Window {
             cell_shader: cell
         };
 
-        window.create_lines();
         window.create_square_VAOs();
 
         Some(window)
-    }
-
-    fn create_lines(&mut self) {
-        let lineVertices: [f32; 2] = [
-            1.0, -1.0
-        ];
-
-        let mut VAO: u32 = 0;
-        unsafe {
-            gl::GenVertexArrays(1, &mut VAO);
-            gl::BindVertexArray(VAO);
-        }
-
-        let mut VBO: u32 = 0;
-        unsafe {
-            gl::GenBuffers(1, &mut VBO);
-
-            gl::BindBuffer(gl::ARRAY_BUFFER, VBO);
-
-            gl::BufferData(gl::ARRAY_BUFFER, lineVertices.len() as isize * 4, lineVertices.as_ptr() as *const std::ffi::c_void, gl::STATIC_DRAW);
-        
-            gl::VertexAttribPointer(0, 1, gl::FLOAT, gl::FALSE, 1 * 4, 0 as *const std::ffi::c_void);
-        
-            gl::EnableVertexAttribArray(0);            
-        }
-
-        self.line_VAO = VAO;
     }
 
     fn create_square_VAOs(&mut self) {
@@ -202,8 +174,8 @@ impl Window {
                 ];
 
                 for cell in &living_cells {
-                    buffer.push( ((cell.get_coords().0) as f32) / (GRID_WIDTH as f32) * 2.0 - 1.0);
-                    buffer.push( ((cell.get_coords().1 + 1) as f32 ) / (GRID_HEIGHT as f32) * 2.0 - 1.0);
+                    buffer.push( ((cell.get_coords().0) as f32) / (unsafe { grid_width } as f32) * 2.0 - 1.0);
+                    buffer.push( ((cell.get_coords().1 + 1) as f32 ) / (unsafe { grid_height } as f32) * 2.0 - 1.0);
                     buffer.push( ( cell.get_color().0 as f32 / 255.0) );
                     buffer.push( ( cell.get_color().1 as f32 / 255.0) );
                     buffer.push( ( cell.get_color().2 as f32 / 255.0) );
@@ -223,27 +195,12 @@ impl Window {
                 gl::VertexAttribDivisor(2, 1);
 
                 self.cell_shader.apply();
-                self.cell_shader.set_uniform_int("width", GRID_WIDTH as i32);
-                self.cell_shader.set_uniform_int("height", GRID_HEIGHT as i32);
+                self.cell_shader.set_uniform_int("width", unsafe { grid_width } as i32);
+                self.cell_shader.set_uniform_int("height", unsafe { grid_height } as i32);
 
                 gl::DrawArraysInstanced(gl::TRIANGLES, 0, 6, living_cells.len() as i32);
 
-            }       
-
-            gl::BindVertexArray(self.line_VAO);
-
-            gl::LineWidth(1.0);
-
-            self.horizontal_shader.apply();
-            self.horizontal_shader.set_uniform_vec3("color", 0.0, 0.0, 0.0);
-            self.horizontal_shader.set_uniform_int("height", GRID_HEIGHT as i32);
-            gl::DrawArraysInstanced(gl::LINES, 0, 2, GRID_HEIGHT as i32);
-
-            self.vertical_shader.apply();
-            self.vertical_shader.set_uniform_vec3("color", 0.0, 0.0, 0.0);
-            self.vertical_shader.set_uniform_int("width", GRID_WIDTH as i32);
-            gl::DrawArraysInstanced(gl::LINES, 0, 2, GRID_HEIGHT as i32);
-            
+            }
 
             glfw::ffi::glfwSwapBuffers(self.ptr);
         }
@@ -291,10 +248,10 @@ extern "C" fn framebufferSizeCallback(window: *mut glfw::ffi::GLFWwindow, width:
         crate::framebuffer_height = height as u32;
         if width > height {
             gl::Viewport(0, 0, height, height);
-            crate::grid_display_width = height as u32;
+            crate::grid_display_side_length = height as u32;
         } else if height >= width {
             gl::Viewport(0, (height - width) / 2, width, width);
-            crate::grid_display_width = width as u32;
+            crate::grid_display_side_length = width as u32;
         }
     }
 }
@@ -317,9 +274,15 @@ extern "C" fn keyCallback(window: *mut glfw::ffi::GLFWwindow, key: i32, scancode
             glfw::ffi::glfwSetWindowShouldClose(window, glfw::ffi::TRUE) 
         };
     } else if key == glfw::ffi::KEY_S && action == glfw::ffi::PRESS {
-        let mut path = String::from("saves\\gen");
-        path.push_str(unsafe { &generation.to_string() });
-        crate::save_to_file(&path);
+        let mut path = PathBuf::new();
+
+        let mut file_name = "gen".to_owned();
+        file_name.push_str(unsafe { &generation.to_string() });
+
+        path.push("saves");
+        path.push(file_name);
+        
+        crate::save_to_file(path.to_str().unwrap());
     }
 }
 
@@ -329,10 +292,10 @@ extern "C" fn mouseButtonCallback(window: *mut glfw::ffi::GLFWwindow, button: i3
             let (mut x, mut y) = (0.0, 0.0);
             glfw::ffi::glfwGetCursorPos(window, &mut x, &mut y);
 
-            if x as u32 <= crate::grid_display_width && y as u32 <= crate::grid_display_width {
+            if x as u32 <= crate::grid_display_side_length && y as u32 <= crate::grid_display_side_length {
 
-                let cell_x = ((x as f32 / (grid_display_width as f32)) * GRID_WIDTH as f32) as u32;
-                let cell_y = (((crate::grid_display_width - y as u32) as f32 / (grid_display_width as f32)) * GRID_HEIGHT  as f32) as u32;
+                let cell_x = ((x as f32 / (grid_display_side_length as f32)) * unsafe { grid_width } as f32) as u32;
+                let cell_y = (((crate::grid_display_side_length - y as u32) as f32 / (grid_display_side_length as f32)) * unsafe { grid_height }  as f32) as u32;
                 let cell_index = (*grid_ptr).get_occupant(cell_x, cell_y);
 
                 if cell_index != None {

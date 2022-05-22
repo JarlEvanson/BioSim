@@ -142,13 +142,14 @@ impl Population {
     }
 
     pub fn assign_random(&mut self, grid: &mut Grid) {
+        println!("{:?}", grid.get_dimensions());
         for index in 0 .. self.size {
             let coords = grid.find_random_unoccupied();
             (*self.cells)[index as usize].set_coords(coords);
 
-
             grid.set_occupant(coords.0, coords.1, Some(index));
         }
+        println!("S");
     }
 
     pub fn add_to_move_queue(&mut self, index: usize, x: u32, y: u32) {
@@ -193,5 +194,13 @@ impl Population {
 
     pub fn get_death_queue_len(&self) -> usize {
         self.death_queue.len()
+    }
+}
+
+impl std::fmt::Debug for Population {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Population")
+            .field("size", &self.size)
+            .finish()
     }
 }

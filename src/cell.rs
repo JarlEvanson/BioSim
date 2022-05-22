@@ -2,7 +2,7 @@ use std::{f32::consts::E, convert::TryInto};
 
 use rand::{thread_rng, Rng};
 
-use crate::{gene::{Gene, NodeID, NodeType}, genome_length, MUTATION_RATE, neuron::NeuralNet, GRID_HEIGHT, GRID_WIDTH, steps, steps_per_gen};
+use crate::{gene::{Gene, NodeID, NodeType}, genome_length, mutation_rate, neuron::NeuralNet, grid_height, grid_width, steps, steps_per_gen};
 
 
 #[derive(Debug)]
@@ -27,13 +27,13 @@ impl Cell {
         }   
 
         let genome = genome.into_boxed_slice();
-        Cell::new(genome, index)
+        Cell::new(genome, thread_rng().gen::<u32>(), index)
     }
 
-    pub fn new(genome: Box<[Gene]>, index: usize) -> Cell {
+    pub fn new(genome: Box<[Gene]>, oscillator: u32, index: usize) -> Cell {
         let neural_net = NeuralNet::new(&genome);
         let color = Cell::create_color(&genome);
-        Cell { x: 0, y: 0, genome, neural_net, is_dead: false, index, last_move_dir: DIR::get_random(), oscillator_period: 34, color }
+        Cell { x: 0, y: 0, genome, neural_net, is_dead: false, index, last_move_dir: DIR::get_random(), oscillator_period: oscillator & unsafe { steps_per_gen }, color }
     }
 
     pub fn sexually_reproduce(cell1: &Cell, cell2: &Cell, index: usize) -> Cell {
@@ -44,14 +44,14 @@ impl Cell {
             //If true, then first cell contributes
             //If false, then second cell contributes
             if thread_rng().gen_bool(0.5) {
-                if thread_rng().gen_range(0.0 as f32 .. 100.0) < unsafe { MUTATION_RATE } {
+                if thread_rng().gen_range(0.0 as f32 .. 100.0) < unsafe { mutation_rate } {
                     let bit = thread_rng().gen_range(0 .. 32 as u32);
                     unsafe {
                         (*new_genes)[i as usize] = (*cell1.genome)[i as usize] ^ (1 << (bit & 31));
                     }
                 }
             } else {
-                if thread_rng().gen_range(0.0 as f32 .. 100.0) < unsafe { MUTATION_RATE } {
+                if thread_rng().gen_range(0.0 as f32 .. 100.0) < unsafe { mutation_rate } {
                     let bit = thread_rng().gen_range(0 .. 32 as u32);
                     unsafe {
                         (*new_genes)[i as usize] = (*cell2.genome)[i as usize] ^ (1 << (bit & 31));
@@ -60,10 +60,27 @@ impl Cell {
             }
         }
 
+        let mut oscillator = 0;
+
+        if thread_rng().gen_bool(0.5) {
+            oscillator = cell1.oscillator_period;
+        } else {
+            oscillator = cell2.oscillator_period;
+        }
+
+        if thread_rng().gen_range(0.0 as f32 .. 100.0) < unsafe { mutation_rate } {
+            let bit = thread_rng().gen_range(0 .. 32 as u32);
+            unsafe {
+                oscillator = oscillator ^ (1 << (bit & 31));
+            }
+        }
+
+
+
         let new_genes = new_genes.into_boxed_slice();
 
 
-        Cell::new(new_genes, index)
+        Cell::new(new_genes, oscillator, index)
     }
 
     pub fn asexually_reproduce(cell: &Cell, index: usize) -> Cell {
@@ -71,7 +88,7 @@ impl Cell {
         let mut new_genes = cell.genome.clone();
 
         for i in 0 .. unsafe { genome_length } {
-            if thread_rng().gen_range(0.0 as f32 .. 100.0) < unsafe { MUTATION_RATE } {
+            if thread_rng().gen_range(0.0 as f32 .. 100.0) < unsafe { mutation_rate } {
                 let bit = thread_rng().gen_range(0 .. 32 as u32);
                 unsafe {
                     *new_genes.as_mut_ptr().add(i as usize) = *new_genes.as_ptr().add(i as usize) ^ (1 << (bit & 31));
@@ -79,16 +96,27 @@ impl Cell {
             }
         }
 
-        Cell::new(new_genes, index)
+        let mut oscillator = cell.oscillator_period;
+
+        if thread_rng().gen_range(0.0 as f32 .. 100.0) < unsafe { mutation_rate } {
+            let bit = thread_rng().gen_range(0 .. 32 as u32);
+            unsafe {
+                oscillator = oscillator ^ (1 << (bit & 31));
+            }
+        }
+
+        Cell::new(new_genes, oscillator, index)
     }
 
     pub fn one_step(&mut self) -> (u32, u32) {
-        self.neural_net.feed_forward(&vec![
-            (2 * self.x) as f32 / (GRID_WIDTH as f32) - 1.0, 
-            (2 * self.y) as f32 / (GRID_HEIGHT as f32) - 1.0, 
-            unsafe { (steps as f32) / (steps_per_gen as f32) },
-            ((unsafe { steps } / self.oscillator_period) % 2) as f32
-         ]);
+        unsafe {
+            self.neural_net.feed_forward(&vec![
+                (2 * self.x) as f32 / (grid_width as f32) - 1.0, 
+                (2 * self.y) as f32 / (grid_height as f32) - 1.0, 
+                steps as f32 / (steps_per_gen as f32),
+                ((((steps as f32 / (self.oscillator_period as f32)) as i32 % 2) * 2) - 1) as f32
+            ]);
+        }
 
         let outputs = self.neural_net.get_outputs();
 
@@ -125,8 +153,8 @@ impl Cell {
             }
         }
 
-        if coords.0 >= GRID_WIDTH {
-            coords.0 = GRID_WIDTH - 1;
+        if coords.0 >= unsafe { grid_width } {
+            coords.0 = unsafe { grid_width } - 1;
         }
 
         if (thread_rng().gen_range(0..i32::MAX) as f32) / (i32::MAX as f32) < y.abs() {
@@ -137,8 +165,8 @@ impl Cell {
             }
         }
 
-        if coords.1 >= GRID_HEIGHT {
-            coords.1 = GRID_HEIGHT - 1;
+        if coords.1 >= unsafe { grid_height } {
+            coords.1 = unsafe { grid_height } - 1;
         }
 
         coords
@@ -201,6 +229,10 @@ impl Cell {
 
     pub fn get_genome(&self) -> &Box<[Gene]> {
         &self.genome
+    }
+
+    pub fn get_oscillator_period(&self) -> u32{
+        self.oscillator_period
     }
 }
 
