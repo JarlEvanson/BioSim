@@ -1,7 +1,7 @@
 use std::fmt::{Debug, write};
 use std::ops::Deref;
 
-use crate::gene::{Gene, NodeID, UNIQUE_OUTPUT_NODES};
+use crate::gene::{Gene, NodeID, OUTPUT_NODE_COUNT, INPUT_NODE_COUNT, INNER_NODE_COUNT};
 use crate::{genome_length, neuron_presence};
 
 use rand::{thread_rng, Rng};
@@ -118,10 +118,10 @@ impl NeuralNet {
     pub fn feed_forward(&mut self, sensor_values: &Vec<f32>) {
         for neuron in self.neurons.as_mut() {
             match neuron.variant {
-                NodeID::DistX => { neuron.value = sensor_values[NodeID::DistX.get_input_index()] },
-                NodeID::DistY => { neuron.value = sensor_values[NodeID::DistY.get_input_index()] },
-                NodeID::Age => { neuron.value = sensor_values[NodeID::Age.get_input_index()] },
-                NodeID::Oscillator => { neuron.value = sensor_values[NodeID::Oscillator.get_input_index()] }
+                NodeID::DistX => { neuron.value = sensor_values[NodeID::DistX.get_index()] },
+                NodeID::DistY => { neuron.value = sensor_values[NodeID::DistY.get_index()] },
+                NodeID::Age => { neuron.value = sensor_values[NodeID::Age.get_index()] },
+                NodeID::Oscillator => { neuron.value = sensor_values[NodeID::Oscillator.get_index()] }
                 _ => {  }
             }
         }
@@ -158,11 +158,11 @@ impl NeuralNet {
     }
 
     pub fn get_outputs(&self) -> Vec<f32> {
-        let mut outputs = vec![0.0; UNIQUE_OUTPUT_NODES as usize];
+        let mut outputs = vec![0.0; OUTPUT_NODE_COUNT as usize];
 
         for neuron in self.neurons.deref() {
             if neuron.variant.is_output() {
-                outputs[NodeID::get_output_index(&neuron.variant)] = neuron.value;
+                outputs[NodeID::get_index(&neuron.variant) - INPUT_NODE_COUNT - INNER_NODE_COUNT] = neuron.value;
             }
         }
 

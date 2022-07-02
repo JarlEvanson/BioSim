@@ -2,7 +2,7 @@ use std::{f32::consts::E, convert::TryInto};
 
 use rand::{thread_rng, Rng};
 
-use crate::{gene::{Gene, NodeID, NodeType}, genome_length, mutation_rate, neuron::NeuralNet, grid_height, grid_width, steps, steps_per_gen};
+use crate::{gene::{Gene, NodeID, NodeType, INPUT_NODE_COUNT, INNER_NODE_COUNT}, genome_length, mutation_rate, neuron::NeuralNet, grid_height, grid_width, steps, steps_per_gen};
 
 
 #[derive(Debug)]
@@ -23,7 +23,7 @@ impl Cell {
         let mut genome = Vec::new();
 
         for gene in 0 .. unsafe { genome_length } {
-            genome.push(Gene::new(thread_rng().gen()));
+            genome.push(Gene::new_random());
         }   
 
         let genome = genome.into_boxed_slice();
@@ -122,21 +122,21 @@ impl Cell {
 
         let offset = DIR::get_random().get_move_offset();
         
-        let mut x = outputs[NodeID::get_output_index(&NodeID::MoveEast)] -
-            outputs[NodeID::get_output_index(&NodeID::MoveWest)] +
-            outputs[NodeID::get_output_index(&NodeID::MoveRandom)] * offset.0 +
-            outputs[NodeID::get_output_index(&NodeID::MoveForward)] * self.last_move_dir.get_move_offset().0 +
-            outputs[NodeID::get_output_index(&NodeID::MoveReverse)] * self.last_move_dir.rotate180().get_move_offset().0 +
-            outputs[NodeID::get_output_index(&NodeID::MoveLeft)] * self.last_move_dir.rotateCCW90().get_move_offset().0 + 
-            outputs[NodeID::get_output_index(&NodeID::MoveRight)] * self.last_move_dir.rotateCW90().get_move_offset().0; 
+        let mut x = outputs[NodeID::get_index(&NodeID::MoveEast)- INPUT_NODE_COUNT - INNER_NODE_COUNT] -
+            outputs[NodeID::get_index(&NodeID::MoveWest)- INPUT_NODE_COUNT - INNER_NODE_COUNT] +
+            outputs[NodeID::get_index(&NodeID::MoveRandom)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * offset.0 +
+            outputs[NodeID::get_index(&NodeID::MoveForward)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * self.last_move_dir.get_move_offset().0 +
+            outputs[NodeID::get_index(&NodeID::MoveReverse)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * self.last_move_dir.rotate180().get_move_offset().0 +
+            outputs[NodeID::get_index(&NodeID::MoveLeft)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * self.last_move_dir.rotateCCW90().get_move_offset().0 + 
+            outputs[NodeID::get_index(&NodeID::MoveRight)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * self.last_move_dir.rotateCW90().get_move_offset().0; 
 
-        let mut y = outputs[NodeID::get_output_index(&NodeID::MoveNorth)] -
-            outputs[NodeID::get_output_index(&NodeID::MoveSouth)] + 
-            outputs[NodeID::get_output_index(&NodeID::MoveRandom)] * offset.1 +
-            outputs[NodeID::get_output_index(&NodeID::MoveForward)] * self.last_move_dir.get_move_offset().1 +
-            outputs[NodeID::get_output_index(&NodeID::MoveReverse)] * self.last_move_dir.get_move_offset().1 +
-            outputs[NodeID::get_output_index(&NodeID::MoveLeft)] * self.last_move_dir.rotateCCW90().get_move_offset().1 + 
-            outputs[NodeID::get_output_index(&NodeID::MoveRight)] * self.last_move_dir.rotateCW90().get_move_offset().1; ;
+        let mut y = outputs[NodeID::get_index(&NodeID::MoveNorth)- INPUT_NODE_COUNT - INNER_NODE_COUNT] -
+            outputs[NodeID::get_index(&NodeID::MoveSouth)- INPUT_NODE_COUNT - INNER_NODE_COUNT] + 
+            outputs[NodeID::get_index(&NodeID::MoveRandom)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * offset.1 +
+            outputs[NodeID::get_index(&NodeID::MoveForward)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * self.last_move_dir.get_move_offset().1 +
+            outputs[NodeID::get_index(&NodeID::MoveReverse)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * self.last_move_dir.get_move_offset().1 +
+            outputs[NodeID::get_index(&NodeID::MoveLeft)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * self.last_move_dir.rotateCCW90().get_move_offset().1 + 
+            outputs[NodeID::get_index(&NodeID::MoveRight)- INPUT_NODE_COUNT - INNER_NODE_COUNT] * self.last_move_dir.rotateCW90().get_move_offset().1; ;
 
         
 

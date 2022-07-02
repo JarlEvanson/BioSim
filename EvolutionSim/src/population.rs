@@ -2,9 +2,7 @@ use std::{ops::Deref, convert::TryInto};
 
 use rand::Rng;
 
-use crate::{cell::{Cell, DIR}, population_size, grid::Grid, NEURON_COUNT, neuron_presence};
-
-
+use crate::{cell::{Cell, DIR}, population_size, grid::Grid, gene::NodeID_COUNT, neuron_presence};
 
 
 pub struct Population {
@@ -19,7 +17,7 @@ impl Population {
         let mut cells = Vec::with_capacity(size.try_into().unwrap());
 
         unsafe {
-            for index in 0 .. NEURON_COUNT {
+            for index in 0 .. NodeID_COUNT {
                 neuron_presence[index] = 0;
             }
         }
@@ -41,7 +39,7 @@ impl Population {
         let mut cells = Vec::with_capacity(size.try_into().unwrap());
 
         unsafe {
-            for index in 0 .. NEURON_COUNT {
+            for index in 0 .. NodeID_COUNT {
                 neuron_presence[index] = 0;
             }
         }
@@ -63,7 +61,7 @@ impl Population {
         let mut cells = Vec::with_capacity(size.try_into().unwrap());
 
         unsafe {
-            for index in 0 .. NEURON_COUNT {
+            for index in 0 .. NodeID_COUNT {
                 neuron_presence[index] = 0;
             }
         }
@@ -81,7 +79,7 @@ impl Population {
 
     pub fn gen_random(&mut self) {
         unsafe { 
-            for index in 0 .. NEURON_COUNT {
+            for index in 0 .. NodeID_COUNT {
                 neuron_presence[index] = 0;
             }
         }
@@ -142,14 +140,12 @@ impl Population {
     }
 
     pub fn assign_random(&mut self, grid: &mut Grid) {
-        println!("{:?}", grid.get_dimensions());
         for index in 0 .. self.size {
             let coords = grid.find_random_unoccupied();
             (*self.cells)[index as usize].set_coords(coords);
 
             grid.set_occupant(coords.0, coords.1, Some(index));
         }
-        println!("S");
     }
 
     pub fn add_to_move_queue(&mut self, index: usize, x: u32, y: u32) {

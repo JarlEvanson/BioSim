@@ -283,6 +283,8 @@ extern "C" fn keyCallback(window: *mut glfw::ffi::GLFWwindow, key: i32, scancode
         path.push(file_name);
         
         crate::save_to_file(path.to_str().unwrap());
+    } else if key == glfw::ffi::KEY_C && action == glfw::ffi::PRESS {
+        crate::printConfig();
     }
 }
 

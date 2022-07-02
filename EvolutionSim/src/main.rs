@@ -1,4 +1,5 @@
-#![allow(non_snake_case, non_upper_case_globals, unused)]
+#![allow(non_snake_case, non_upper_case_globals, unused, temporary_cstring_as_ptr)]
+#![feature(trace_macros)]
 
 extern crate rand;
 
@@ -18,10 +19,12 @@ mod cell;
 use cell::Cell;
 
 mod gene;
-use gene::{Gene, UNIQUE_INNER_NODES, UNIQUE_INPUT_NODES, UNIQUE_OUTPUT_NODES};
+use gene::{Gene, INNER_NODE_COUNT, INPUT_NODE_COUNT, OUTPUT_NODE_COUNT, NodeID_COUNT};
 
 use crate::{gene::NodeID, windowed::window::wait};
 mod neuron;
+
+extern crate ProcBiosim;
 
 //Settings
 static mut population_size: u32 = 4000;
@@ -31,11 +34,8 @@ static mut grid_height: u32 = 200;
 static mut mutation_rate: f32 = 0.1;
 static mut steps_per_gen: u32 = 500;
 
-
-
 //Statistics
-const NEURON_COUNT: usize = (UNIQUE_INNER_NODES + UNIQUE_INPUT_NODES + UNIQUE_OUTPUT_NODES) as usize;
-static mut neuron_presence: [u32; NEURON_COUNT] = [0; NEURON_COUNT];
+static mut neuron_presence: [u32; NodeID_COUNT] = [0; NodeID_COUNT];
 
 //Pointers
 static mut grid_ptr: *mut Grid = 0 as *mut Grid;
@@ -54,6 +54,13 @@ static mut should_reset: bool = false;
 static mut pause: bool = false;
 
 fn main() {
+    let mut tally: [u32; NodeID_COUNT] = [0; NodeID_COUNT];
+    for i in 0 .. 100000 {
+        let id = NodeID::from_index(rand::thread_rng().gen_range(0 .. (INPUT_NODE_COUNT + INNER_NODE_COUNT)));
+        tally[id.get_index()] += 1;
+    }
+
+
     println!("The argument file=\"path\" will load the save");
 
     unsafe {
@@ -62,12 +69,14 @@ fn main() {
 
         let pop_layout = std::alloc::Layout::new::<Population>();
         pop_ptr = std::alloc::alloc(pop_layout) as *mut Population;
+
+
+        let pop = Population::new(1);
+        std::ptr::write(pop_ptr, pop);
+
+        let grid = Grid::new(1, 1);
+        std::ptr::write(grid_ptr, grid);
     }
-
-    unsafe { *grid_ptr = Grid::new(1, 1); }
-
-    unsafe { *pop_ptr = Population::new(1); }
-
 
     const windowing: bool = true;
     if windowing {
@@ -81,14 +90,12 @@ fn main() {
         }
         window.make_current();
 
-        
-
         let mut config_file = None;
         
 
         for argument in std::env::args() {
             if (&argument).find("file=") != None {
-                config_file = Some(load_from_file(&argument[5..]).to_owned());
+                config_file = Some(load_from_file(&argument["file=".len()..]).to_owned());
                 break;
             } else if (&argument).find("config=") != None {
                 config_file = Some(argument["config".len()+1..].to_owned());
@@ -106,8 +113,6 @@ fn main() {
                 (*grid_ptr) = Grid::new(grid_width, grid_height);
                 (*pop_ptr) = Population::new(population_size);
             };
-
-            unsafe { println!("{} {} {:?}", grid_width, grid_height, &*grid_ptr); }
         }
 
         
@@ -115,8 +120,6 @@ fn main() {
         unsafe { (*pop_ptr).assign_random(&mut *grid_ptr) };
 
         let mut gen: u32 = 0;
-
-        println!("Heelo");
         
         window.render(unsafe { &*pop_ptr }.get_living_cells());
 
@@ -326,7 +329,6 @@ pub fn load_from_file(path: &str) -> &str {
 pub fn load_config(string: &str) {
     let mut lines = string.lines();
 
-
     if lines.next().unwrap() != "[Config]" {
         panic!("Invalid Config File");
     }
@@ -338,6 +340,13 @@ pub fn load_config(string: &str) {
         genome_length = read_ini_entry("GenomeLength", lines.next().unwrap()).unwrap();
         steps_per_gen = read_ini_entry("StepsPerGen", lines.next().unwrap()).unwrap();
         mutation_rate = read_ini_entry("MutationRate", lines.next().unwrap()).unwrap();
+    }
+
+}
+
+pub fn printConfig() {
+    unsafe {
+        println!("GridWidth={}\nGridHeight={}\nPopulationSize={}\nGenomeLength={}\nStepsPerGen={}\nMutationRate={}", crate::grid_width, crate::grid_height, crate::population_size, crate::genome_length, crate::steps_per_gen, crate::mutation_rate);
     }
 }
 

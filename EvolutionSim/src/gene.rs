@@ -1,5 +1,9 @@
 use std::{fmt::{Display, Debug, Write}, ops::BitXor};
 
+use rand::Rng;
+
+use ProcBiosim::mergeEnums;
+
 #[derive(Clone, Copy)]
 pub struct Gene {
     /*Bit 31 = Head Type -> 1 bit
@@ -14,6 +18,31 @@ pub struct Gene {
 impl Gene {
     #[inline(always)]
     pub fn new(gene: u32) -> Gene {
+        Gene { gene }
+    }
+
+    #[inline(always)]
+    pub fn new_random() -> Gene {
+        let mut gene = 0;
+
+        let head_node = NodeID::from_index(rand::thread_rng().gen_range(0 .. (INPUT_NODE_COUNT + INNER_NODE_COUNT)));
+
+        if head_node.is_input() {
+            gene = gene | (1 << 31);
+        }
+
+        gene = gene | ( head_node.get_index() << 24);
+
+        let tail_node = NodeID::from_index(rand::thread_rng().gen_range(0 .. (INNER_NODE_COUNT + OUTPUT_NODE_COUNT)) + FIRST_INNER_NODE_INDEX);
+
+        if tail_node.is_inner() {
+            gene = gene | (1 << 23);
+        }
+
+        gene = gene | ( (tail_node.get_index() - INPUT_NODE_COUNT + 1) << 16 );
+
+        let gene = (gene | (rand::thread_rng().gen::<u16>() as usize)) as u32;
+
         Gene { gene }
     }
 
@@ -80,29 +109,33 @@ impl PartialEq for NodeType {
     }
 }
 
-pub const UNIQUE_INPUT_NODES: u8 = 4;
-pub const UNIQUE_INNER_NODES: u8 = 3;
-pub const UNIQUE_OUTPUT_NODES: u8 = 9;
-
-#[derive(Clone, Copy, Debug)]
-pub enum NodeID {
-    DistX,
-    DistY,
-    Age,
-    Oscillator,
-    Inner1,
-    Inner2,
-    Inner3,
-    MoveNorth,
-    MoveSouth,
-    MoveEast,
-    MoveWest,
-    MoveRandom,
-    MoveForward,
-    MoveRight,
-    MoveLeft,
-    MoveReverse
-}
+//#[derive(Debug, Clone, Copy)]
+mergeEnums!(
+    NodeID,
+    enum INPUT_NODE {
+        DistX,
+        DistY,
+        Age,
+        Oscillator
+    },
+    enum INNER_NODE {
+        Inner1,
+        Inner2,
+        Inner3
+    },
+    enum OUTPUT_NODE {
+        MoveNorth,
+        MoveEast,
+        MoveSouth,
+        MoveWest,
+        MoveRandom,
+        MoveForward,
+        MoveRight,
+        MoveLeft,
+        MoveReverse,
+        KillForward
+    }
+);
 
 impl Display for NodeID {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -113,99 +146,28 @@ impl Display for NodeID {
 }
 
 impl PartialEq for NodeID {
-
     fn eq(&self, other: &Self) -> bool {
         core::mem::discriminant(self) == core::mem::discriminant(other)
     }
 }
 
 impl NodeID {
-    pub fn get_output_index(&self) -> usize {
-        match *self {
-            NodeID::MoveNorth => 0,
-            NodeID::MoveSouth => 1,
-            NodeID::MoveEast => 2,
-            NodeID::MoveWest => 3,
-            NodeID::MoveForward => 4,
-            NodeID::MoveRight => 5,
-            NodeID::MoveLeft => 6,
-            NodeID::MoveReverse => 7,
-            NodeID::MoveRandom => 8,
-            _ => unimplemented!()
-        }
-    }
-
-    pub fn from_output_index(index: usize) -> &'static str {
-        match index {
-            0  => "MoveNorth",
-            1  => "MoveSouth",
-            2  => "MoveEast",
-            3  => "MoveWest",
-            4  => "MoveRandom",
-            5 => "MoveForward",
-            6 => "MoveRight",
-            7 => "MoveLeft",
-            8 => "MoveReverse",
-            _ => ""
-        }
-    }
-
-    pub fn get_input_index(&self) -> usize {
-        match *self {
-            NodeID::DistX => 0,
-            NodeID::DistY => 1,
-            NodeID::Age => 2,
-            NodeID::Oscillator => 3,
-            _ => unimplemented!()
-        }
-    }
-
     pub fn get_index(&self) -> usize {
-        match *self {
-            NodeID::Oscillator => 0,
-            NodeID::Age => 1,
-            NodeID::DistX => 2,
-            NodeID::DistY => 3,
-            NodeID::Inner1 => 4,
-            NodeID::Inner2 => 5,
-            NodeID::Inner3 => 6,
-            NodeID::MoveNorth  => 7,
-            NodeID::MoveSouth  => 8,
-            NodeID::MoveEast  => 9,
-            NodeID::MoveWest => 10,
-            NodeID::MoveForward => 11,
-            NodeID::MoveRight => 12,
-            NodeID::MoveLeft => 13,
-            NodeID::MoveReverse => 14,
-            NodeID::MoveRandom => 15,
-            _ => unimplemented!()
-        }
+        (*self) as usize
     }
 
-    pub fn from_index(index: usize) -> &'static str {
-        match index {
-            0 => "Oscillator",
-            1 => "Age",
-            2 => "DistX",
-            3 => "DistY",
-            4 => "Inner1",
-            5 => "Inner2",
-            6 => "Inner3",
-            7 => "MoveNorth",
-            8 => "MoveSouth",
-            9 => "MoveEast",
-            10 => "MoveWest",
-            11 => "MoveForward",
-            12 => "MoveRight",
-            13 => "MoveLeft",
-            14 => "MoveReverse",
-            15 => "MoveRandom",
-            _ => unimplemented!()
+    pub fn from_index(index: usize) -> NodeID {
+        if index < NodeID_COUNT {
+            unsafe {
+                return std::mem::transmute::<u8, NodeID>(index as u8)
+            }
+        } else {
+            panic!("Invalid index");
         }
     }
 
     pub fn as_inner(value: u8) -> NodeID {
-        match (value & 0b01111111) % UNIQUE_INNER_NODES {
+        match (value & 0b01111111) % INNER_NODE_COUNT as u8 {
             0 => NodeID::Inner1,
             1 => NodeID::Inner2,
             2 => NodeID::Inner3,
@@ -214,7 +176,7 @@ impl NodeID {
     }
 
     pub fn as_input(value: u8) -> NodeID {
-        match (value & 0b01111111) % UNIQUE_INPUT_NODES {
+        match (value & 0b01111111) % INPUT_NODE_COUNT as u8 {
             0 => NodeID::DistX,
             1 => NodeID::DistY,
             2 => NodeID::Age,
@@ -224,7 +186,7 @@ impl NodeID {
     }
 
     pub fn as_output(value: u8) -> NodeID {
-        match (value & 0b01111111) % UNIQUE_OUTPUT_NODES {
+        match (value & 0b01111111) % OUTPUT_NODE_COUNT as u8 {
             0 => NodeID::MoveNorth,
             1 => NodeID::MoveSouth,
             2 => NodeID::MoveEast,
@@ -234,6 +196,7 @@ impl NodeID {
             6 => NodeID::MoveRight,
             7 => NodeID::MoveLeft,
             8 => NodeID::MoveReverse,
+            9 => NodeID::KillForward,
             _ => unreachable!()
         }
     }
@@ -251,7 +214,8 @@ impl NodeID {
     pub fn is_input(&self) -> bool {
         if  *self == NodeID::DistX || 
             *self == NodeID::DistY ||
-            *self == NodeID::Age
+            *self == NodeID::Age ||
+            *self == NodeID::Oscillator
         {
             return true
         }
@@ -267,7 +231,8 @@ impl NodeID {
             *self == NodeID::MoveForward ||
             *self == NodeID::MoveRight ||
             *self == NodeID::MoveLeft ||
-            *self == NodeID::MoveReverse
+            *self == NodeID::MoveReverse ||
+            *self == NodeID::KillForward
         {
             return true
         }
