@@ -1,10 +1,22 @@
-#![allow(non_snake_case, non_upper_case_globals, unused, temporary_cstring_as_ptr)]
+#![allow(
+    non_snake_case,
+    non_upper_case_globals,
+    unused,
+    temporary_cstring_as_ptr
+)]
 #![feature(trace_macros)]
 
 extern crate rand;
 
 mod windowed;
-use std::{thread::{sleep}, ops::{Deref, DerefMut}, fmt::Write, io::Read, path::Path, fs::File};
+use std::{
+    fmt::Write,
+    fs::File,
+    io::Read,
+    ops::{Deref, DerefMut},
+    path::Path,
+    thread::sleep,
+};
 
 use rand::Rng;
 use windowed::window::Window;
@@ -19,12 +31,14 @@ mod cell;
 use cell::Cell;
 
 mod gene;
-use gene::{Gene, INNER_NODE_COUNT, INPUT_NODE_COUNT, OUTPUT_NODE_COUNT, NodeID_COUNT};
+use gene::{Gene, NodeID_COUNT, INNER_NODE_COUNT, INPUT_NODE_COUNT, OUTPUT_NODE_COUNT};
 
 use crate::{gene::NodeID, windowed::window::wait};
 mod neuron;
 
-extern crate ProcBiosim;
+mod threadpool;
+
+extern crate ProcEvolutionSim;
 
 //Settings
 static mut population_size: u32 = 4000;
@@ -55,11 +69,12 @@ static mut pause: bool = false;
 
 fn main() {
     let mut tally: [u32; NodeID_COUNT] = [0; NodeID_COUNT];
-    for i in 0 .. 100000 {
-        let id = NodeID::from_index(rand::thread_rng().gen_range(0 .. (INPUT_NODE_COUNT + INNER_NODE_COUNT)));
+    for i in 0..100000 {
+        let id = NodeID::from_index(
+            rand::thread_rng().gen_range(0..(INPUT_NODE_COUNT + INNER_NODE_COUNT)),
+        );
         tally[id.get_index()] += 1;
     }
-
 
     println!("The argument file=\"path\" will load the save");
 
@@ -69,7 +84,6 @@ fn main() {
 
         let pop_layout = std::alloc::Layout::new::<Population>();
         pop_ptr = std::alloc::alloc(pop_layout) as *mut Population;
-
 
         let pop = Population::new(1);
         std::ptr::write(pop_ptr, pop);
@@ -91,14 +105,13 @@ fn main() {
         window.make_current();
 
         let mut config_file = None;
-        
 
         for argument in std::env::args() {
             if (&argument).find("file=") != None {
                 config_file = Some(load_from_file(&argument["file=".len()..]).to_owned());
                 break;
             } else if (&argument).find("config=") != None {
-                config_file = Some(argument["config".len()+1..].to_owned());
+                config_file = Some(argument["config".len() + 1..].to_owned());
             }
         }
 
@@ -109,38 +122,40 @@ fn main() {
             file.read_to_string(&mut string);
             load_config(string.as_str());
 
-            unsafe { 
+            unsafe {
                 (*grid_ptr) = Grid::new(grid_width, grid_height);
                 (*pop_ptr) = Population::new(population_size);
             };
         }
 
-        
-
         unsafe { (*pop_ptr).assign_random(&mut *grid_ptr) };
 
         let mut gen: u32 = 0;
-        
+
         window.render(unsafe { &*pop_ptr }.get_living_cells());
 
-        unsafe { accounted_time = glfw::ffi::glfwGetTime(); }
+        unsafe {
+            accounted_time = glfw::ffi::glfwGetTime();
+        }
 
         while !window.shouldClose() {
             window.poll();
             if unsafe { should_reset } {
-                unsafe { 
-                    accounted_time = glfw::ffi::glfwGetTime(); 
+                unsafe {
+                    accounted_time = glfw::ffi::glfwGetTime();
                     steps = 0;
                     generation = 0;
                     should_reset = false;
                 }
 
-                unsafe { &mut*pop_ptr }.gen_random();
+                unsafe { &mut *pop_ptr }.gen_random();
             }
 
             if unsafe { steps == 0 } {
-                unsafe { (*grid_ptr).reset(); }
-                unsafe { &mut*pop_ptr }.assign_random(unsafe { &mut *grid_ptr });
+                unsafe {
+                    (*grid_ptr).reset();
+                }
+                unsafe { &mut *pop_ptr }.assign_random(unsafe { &mut *grid_ptr });
 
                 window.render(unsafe { &*pop_ptr }.get_living_cells());
 
@@ -148,50 +163,86 @@ fn main() {
             }
 
             if unsafe { glfw::ffi::glfwGetTime() - accounted_time > 0.016 && !pause } {
-                unsafe { 
-                    accounted_time += 0.016; 
-                    steps += 1; 
+                unsafe {
+                    accounted_time += 0.016;
+                    steps += 1;
                 };
 
                 let living = unsafe { &*pop_ptr }.get_living_indices();
 
-                for index in &living {
-                    let (x, y) = unsafe { &mut *pop_ptr }.get_mut_cell(*index).one_step();
-                    unsafe { &mut *pop_ptr }.add_to_move_queue(*index, x, y);
-                }
+                std::thread::scope(|s| {
+                    let (sender1, reciever) = std::sync::mpsc::channel();
+
+                    let sender2 = sender1.clone();
+
+                    let (v1, v2) = living.split_at(living.len() / 2);
+
+                    let thread1 = s.spawn(move || {
+                        for index in v1 {
+                            let coords = unsafe { &mut *pop_ptr }.get_mut_cell(*index).one_step();
+                            sender1.send((*index, coords));
+                        }
+                    });
+
+                    let thread2 = s.spawn(move || {
+                        for index in v2 {
+                            let coords = unsafe { &mut *pop_ptr }.get_mut_cell(*index).one_step();
+                            sender2.send((*index, coords));
+                        }
+                    });
+
+                    let mut reced = 0;
+
+                    while reced < living.len() {
+                        match reciever.recv() {
+                            Ok((index, (x, y))) => {
+                                unsafe { &mut *pop_ptr }.add_to_move_queue(index, x, y);
+                                reced += 1;
+                            }
+                            Err(e) => {
+                                println!("{}", e);
+                                break;
+                            }
+                        }
+                    }
+
+                    thread1.join();
+                    thread2.join();
+                });
 
                 determine_deaths(unsafe { &mut *pop_ptr });
 
                 unsafe { &mut *pop_ptr }.resolve_dead(unsafe { &mut *grid_ptr });
                 unsafe { &mut *pop_ptr }.resolve_movements(unsafe { &mut *grid_ptr });
-                
+
                 window.render(unsafe { &*pop_ptr }.get_living_cells());
             }
 
             if unsafe { steps == steps_per_gen } {
-
                 let reproducers = determine_reproducers(unsafe { &mut *pop_ptr });
                 if reproducers.len() == 0 {
                     println!("Failed to produce viable offspring");
                     loop {
                         window.poll();
                         if window.shouldClose() || unsafe { should_reset } {
-                            unsafe { accounted_time =  glfw::ffi::glfwGetTime() };
+                            unsafe { accounted_time = glfw::ffi::glfwGetTime() };
                             break;
                         }
                     }
                     continue;
                 }
 
-                println!("Dead: {:3}\tReproducing: {:3}\tLiving Non-reproducing: {:3}", 
-                    unsafe { population_size } - unsafe { &*pop_ptr }.get_living_indices().len() as u32, 
+                println!(
+                    "Dead: {:3}\tReproducing: {:3}\tLiving Non-reproducing: {:3}",
+                    unsafe { population_size }
+                        - unsafe { &*pop_ptr }.get_living_indices().len() as u32,
                     reproducers.len(),
                     unsafe { &*pop_ptr }.get_living_indices().len() - reproducers.len(),
                 );
 
                 wait(&window, 2.0);
 
-                unsafe { 
+                unsafe {
                     *pop_ptr = {
                         let mut reproducing_cells = Vec::new();
                         for index in reproducers {
@@ -199,29 +250,31 @@ fn main() {
                         }
 
                         Population::new_asexually(unsafe { population_size }, &reproducing_cells)
-                    }; 
+                    };
                 }
-                
+
                 unsafe { steps = 0 };
                 unsafe { generation += 1 };
             }
-        } 
+        }
     }
 }
 
 pub fn determine_reproducers(pop: &Population) -> Vec<usize> {
     let mut reproducers = Vec::new();
     for cell in pop.get_living_cells() {
-        if cell.get_coords().0 < unsafe { unsafe { grid_width } } / 4 || cell.get_coords().0 > 3 * unsafe { unsafe { grid_width } } / 4 {
+        if cell.get_coords().0 < unsafe { unsafe { grid_width } } / 4
+            || cell.get_coords().0 > 3 * unsafe { unsafe { grid_width } } / 4
+        {
             reproducers.push(cell.get_index());
-        } 
+        }
     }
 
     reproducers
 }
 
 pub fn determine_deaths(pop: &mut Population) {
-    if unsafe { steps == steps_per_gen / 4  } {
+    if unsafe { steps == steps_per_gen / 4 } {
         for index in &pop.get_living_indices() {
             let (x, y) = pop.get_cell(*index).get_coords();
 
@@ -287,7 +340,7 @@ pub fn load_from_file(path: &str) -> &str {
         let mut splits = string.split("[Save]\n");
         let config = splits.next().unwrap();
         (config, splits.next().unwrap())
-    };    
+    };
 
     load_config(config);
 
@@ -300,28 +353,29 @@ pub fn load_from_file(path: &str) -> &str {
 
     let mut cells = Vec::new();
 
-    let mut genome = vec![Gene { gene: 0}; unsafe { genome_length } as usize].into_boxed_slice();
+    let mut genome = vec![Gene { gene: 0 }; unsafe { genome_length } as usize].into_boxed_slice();
 
     for (index, line) in lines.enumerate() {
-
         let mut oscillator = 0;
-        
+
         for (genome_index, gene) in line.split_ascii_whitespace().enumerate() {
             if genome_index == 0 {
                 oscillator = u32::from_str_radix(gene, 10).unwrap();
             } else {
-                genome[genome_index - 1] = Gene { gene: u32::from_str_radix(gene, 16).unwrap() };
-            }            
+                genome[genome_index - 1] = Gene {
+                    gene: u32::from_str_radix(gene, 16).unwrap(),
+                };
+            }
         }
 
         cells.push(Cell::new(genome.clone(), oscillator, index));
     }
 
-    unsafe { 
-        (*pop_ptr) = Population::new_with_cells(unsafe { population_size }, cells.into_boxed_slice());
+    unsafe {
+        (*pop_ptr) =
+            Population::new_with_cells(unsafe { population_size }, cells.into_boxed_slice());
         (*grid_ptr) = Grid::new(grid_width, grid_height);
     }
-
 
     path
 }
@@ -341,7 +395,6 @@ pub fn load_config(string: &str) {
         steps_per_gen = read_ini_entry("StepsPerGen", lines.next().unwrap()).unwrap();
         mutation_rate = read_ini_entry("MutationRate", lines.next().unwrap()).unwrap();
     }
-
 }
 
 pub fn printConfig() {
@@ -350,8 +403,11 @@ pub fn printConfig() {
     }
 }
 
-pub fn read_ini_entry<T: std::str::FromStr>(key: &'static str, str: &str) -> Result<T, <T as std::str::FromStr>::Err> {
-    (&str[key.len()+1..]).parse::<T>()
+pub fn read_ini_entry<T: std::str::FromStr>(
+    key: &'static str,
+    str: &str,
+) -> Result<T, <T as std::str::FromStr>::Err> {
+    (&str[key.len() + 1..]).parse::<T>()
 }
 
 pub fn output_ini_entry<T: std::fmt::Display>(string: &mut String, key: &'static str, obj: T) {

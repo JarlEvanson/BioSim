@@ -2,7 +2,7 @@ use std::{fmt::{Display, Debug, Write}, ops::BitXor};
 
 use rand::Rng;
 
-use ProcBiosim::mergeEnums;
+use ProcEvolutionSim::mergeEnums;
 
 #[derive(Clone, Copy)]
 pub struct Gene {
