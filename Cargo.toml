@@ -3,4 +3,5 @@
 members = [
     "EvolutionSim",
     "ProcEvolutionSim",
+    "threadpool"
 ]

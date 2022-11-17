@@ -12,7 +12,9 @@ use std::{
     io::Read,
     ops::{Add, Deref, DerefMut},
     path::Path,
+    process::exit,
     slice::Chunks,
+    sync::mpsc::Sender,
     thread::sleep,
 };
 
@@ -38,8 +40,8 @@ use gene::{Gene, NodeID, NodeID_COUNT, INNER_NODE_COUNT, INPUT_NODE_COUNT, OUTPU
 use crate::windowed::window::wait;
 mod neuron;
 
-mod threadpool;
-use threadpool::ScopedThreadPool;
+extern crate threadpool;
+use threadpool::ThreadPool;
 
 extern crate ProcEvolutionSim;
 
@@ -173,7 +175,7 @@ fn main() {
                 outputted = true;
             }
 
-            if true || unsafe { glfw::ffi::glfwGetTime() - accounted_time > 0.016 && !pause } {
+            if unsafe { glfw::ffi::glfwGetTime() - accounted_time > 0.016 && !pause } {
                 outputted = false;
                 unsafe {
                     accounted_time += 0.016;
@@ -184,43 +186,77 @@ fn main() {
 
                 let chunks: Chunks<usize> = {
                     let threads = threadpool.getThreadCount();
-
-                    let x = living.as_slice();
-
                     let (num, rem) = (living.len() / threads, living.len() % threads);
 
+                    let x = living.as_slice();
                     x.chunks(if rem != 0 { num + 1 } else { num })
                 };
 
+                let (sender, reciever) = std::sync::mpsc::channel();
+
                 for chunk in chunks {
+                    #[derive(Debug)]
+                    struct Arg {
+                        ptr: *const usize,
+                        len: usize,
+                        sender: Sender<(usize, (u32, u32))>,
+                    }
                     let ptr = unsafe {
-                        let lay = std::alloc::Layout::array::<usize>(2).unwrap();
-                        let ptr = std::alloc::alloc(lay) as *mut usize;
-                        *ptr = std::mem::transmute(chunk.as_ptr());
-                        *ptr.add(1) = chunk.len();
+                        let lay = std::alloc::Layout::new::<Arg>();
+                        let ptr = std::alloc::alloc(lay) as *mut Arg;
+                        if ptr.is_null() {
+                            println!("Failed to allocate");
+                            exit(1);
+                        }
+
+                        (*ptr).ptr = chunk.as_ptr();
+                        (*ptr).len = chunk.len();
+
+                        (*ptr).sender = sender.clone();
+
+                        std::mem::forget(std::mem::replace(&mut (*ptr).sender, sender.clone()));
+
                         ptr
                     };
+
+                    /*
+
                     threadpool.addWork(
                         |arg| {
-                            let arg = arg as *const usize;
-                            let ptr = unsafe { std::mem::transmute::<usize, *const usize>(*arg) };
-                            let len = unsafe { *arg.add(1) };
+
+                            /*
+                            let arg = unsafe { &*(arg as *const Arg) };
+
+                            for offset in 0..arg.len {
+                                let index = unsafe { *arg.ptr.add(offset) };
+
+                                let coords =
+                                    unsafe { &mut *pop_ptr }.get_mut_cell(index).one_step();
+                            }
+
+                            unsafe {
+                                std::alloc::dealloc(
+                                    std::mem::transmute(arg),
+                                    std::alloc::Layout::array::<usize>(2).unwrap(),
+                                )
+                            };
+
+                            */
                         },
                         ptr as *const std::ffi::c_void,
                     );
+                    */
                 }
 
                 std::thread::scope(|s| {
-                    let (sender1, reciever) = std::sync::mpsc::channel();
-
-                    let sender2 = sender1.clone();
+                    let sender2 = sender.clone();
 
                     let (v1, v2) = living.split_at(living.len() / 2);
 
                     let thread1 = s.spawn(move || {
                         for index in v1 {
                             let coords = unsafe { &mut *pop_ptr }.get_mut_cell(*index).one_step();
-                            sender1.send((*index, coords));
+                            sender.send((*index, coords));
                         }
                     });
 
@@ -297,6 +333,8 @@ fn main() {
                 unsafe { generation += 1 };
             }
         }
+    } else {
+        unimplemented!();
     }
 }
 
