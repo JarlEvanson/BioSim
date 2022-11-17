@@ -6,17 +6,19 @@
 )]
 #![feature(trace_macros)]
 
-extern crate rand;
-
-mod windowed;
 use std::{
     fmt::Write,
     fs::File,
     io::Read,
-    ops::{Deref, DerefMut},
+    ops::{Add, Deref, DerefMut},
     path::Path,
+    slice::Chunks,
     thread::sleep,
 };
+
+extern crate rand;
+
+mod windowed;
 
 use rand::Rng;
 use windowed::window::Window;
@@ -31,12 +33,13 @@ mod cell;
 use cell::Cell;
 
 mod gene;
-use gene::{Gene, NodeID_COUNT, INNER_NODE_COUNT, INPUT_NODE_COUNT, OUTPUT_NODE_COUNT};
+use gene::{Gene, NodeID, NodeID_COUNT, INNER_NODE_COUNT, INPUT_NODE_COUNT, OUTPUT_NODE_COUNT};
 
-use crate::{gene::NodeID, windowed::window::wait};
+use crate::windowed::window::wait;
 mod neuron;
 
 mod threadpool;
+use threadpool::ScopedThreadPool;
 
 extern crate ProcEvolutionSim;
 
@@ -93,6 +96,7 @@ fn main() {
     }
 
     const windowing: bool = true;
+
     if windowing {
         println!("Press R to reset simulation\nPress SPACE to pause and restart simulation\nPress E to print current neuron frequencies\nPress Escape to close window\nPress S to save current generation's genes");
 
@@ -138,6 +142,11 @@ fn main() {
             accounted_time = glfw::ffi::glfwGetTime();
         }
 
+        let mut outputted = false;
+
+        let mut threadpool =
+            ScopedThreadPool::new(std::thread::available_parallelism().unwrap().get());
+
         while !window.shouldClose() {
             window.poll();
             if unsafe { should_reset } {
@@ -151,7 +160,7 @@ fn main() {
                 unsafe { &mut *pop_ptr }.gen_random();
             }
 
-            if unsafe { steps == 0 } {
+            if unsafe { steps == 0 } && !outputted {
                 unsafe {
                     (*grid_ptr).reset();
                 }
@@ -160,15 +169,46 @@ fn main() {
                 window.render(unsafe { &*pop_ptr }.get_living_cells());
 
                 println!("Generation {}:", unsafe { generation });
+
+                outputted = true;
             }
 
-            if unsafe { glfw::ffi::glfwGetTime() - accounted_time > 0.016 && !pause } {
+            if true || unsafe { glfw::ffi::glfwGetTime() - accounted_time > 0.016 && !pause } {
+                outputted = false;
                 unsafe {
                     accounted_time += 0.016;
                     steps += 1;
                 };
 
                 let living = unsafe { &*pop_ptr }.get_living_indices();
+
+                let chunks: Chunks<usize> = {
+                    let threads = threadpool.getThreadCount();
+
+                    let x = living.as_slice();
+
+                    let (num, rem) = (living.len() / threads, living.len() % threads);
+
+                    x.chunks(if rem != 0 { num + 1 } else { num })
+                };
+
+                for chunk in chunks {
+                    let ptr = unsafe {
+                        let lay = std::alloc::Layout::array::<usize>(2).unwrap();
+                        let ptr = std::alloc::alloc(lay) as *mut usize;
+                        *ptr = std::mem::transmute(chunk.as_ptr());
+                        *ptr.add(1) = chunk.len();
+                        ptr
+                    };
+                    threadpool.addWork(
+                        |arg| {
+                            let arg = arg as *const usize;
+                            let ptr = unsafe { std::mem::transmute::<usize, *const usize>(*arg) };
+                            let len = unsafe { *arg.add(1) };
+                        },
+                        ptr as *const std::ffi::c_void,
+                    );
+                }
 
                 std::thread::scope(|s| {
                     let (sender1, reciever) = std::sync::mpsc::channel();
