@@ -3,5 +3,7 @@
 members = [
     "EvolutionSim",
     "ProcEvolutionSim",
-    "threadpool"
 ]
+
+[profile.release]
+debug = true

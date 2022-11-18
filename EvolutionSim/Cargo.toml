@@ -8,5 +8,5 @@ version = "0.1.0"
 glfw = "0.43.0"
 gl = "0.14.0"
 rand = "0.8.5"
+scoped_threadpool = "0.1.*"
 ProcEvolutionSim = { path = "../ProcEvolutionSim" }
-threadpool = { path = "../threadpool" }
