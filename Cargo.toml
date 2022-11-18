@@ -4,3 +4,6 @@ members = [
     "EvolutionSim",
     "ProcEvolutionSim",
 ]
+
+[profile.release]
+debug = true
