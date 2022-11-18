@@ -408,6 +408,8 @@ pub fn save_to_file() {
 
     let path = path.to_str().unwrap();
 
+    std::fs::create_dir_all("saves");
+
     let mut file = std::fs::File::create(path).expect("Failed to create file");
 
     let mut string = String::new();
