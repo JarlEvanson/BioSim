@@ -1,19 +1,16 @@
 #![allow(temporary_cstring_as_ptr)]
 
-use std::path::PathBuf;
+use std::alloc::{self, Layout};
+use std::ffi::c_void;
+use std::ptr::{self, write};
 use std::{ffi::CString, os::raw::c_char};
 
-use crate::generation;
+use crate::Config;
 
 extern crate glfw;
 
 use crate::{
-    accounted_time,
-    cell::Cell,
-    gene::NodeID,
-    grid::{self, Grid},
-    grid_display_side_length, grid_height, grid_ptr, grid_width, neuron_presence, pause, pop_ptr,
-    should_reset,
+    accounted_time, cell::Cell, gene::NodeID, neuron_presence, pause, should_reset,
     windowed::shader::Shader,
 };
 
@@ -29,7 +26,7 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn createWindow(width: i32, height: i32) -> Option<Window> {
+    pub fn createWindow(config: &Config, width: i32, height: i32) -> Option<Window> {
         let ptr = unsafe {
             glfw::ffi::glfwInit();
 
@@ -57,7 +54,11 @@ impl Window {
 
             glfw::ffi::glfwSetKeyCallback(ptr, Some(keyCallback));
 
-            glfw::ffi::glfwSetMouseButtonCallback(ptr, Some(mouseButtonCallback));
+            let layout = Layout::new::<Config>();
+            let configPtr = alloc::alloc(layout) as *mut Config;
+            write(configPtr, config.clone());
+
+            glfw::ffi::glfwSetWindowUserPointer(ptr, configPtr as *mut c_void);
 
             ptr
         };
@@ -159,7 +160,7 @@ impl Window {
         self.cell_VAO = VAO;
     }
 
-    pub fn render(&self, living_cells: Vec<&Cell>) {
+    pub fn render(&self, config: &Config, living_cells: Vec<&Cell>) {
         unsafe {
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT);
@@ -192,15 +193,15 @@ impl Window {
 
                 for cell in &living_cells {
                     buffer.push(
-                        ((cell.get_coords().0) as f32) / (unsafe { grid_width } as f32) * 2.0 - 1.0,
+                        ((cell.get_coords().0) as f32) / (config.getGridWidth() as f32) * 2.0 - 1.0,
                     );
                     buffer.push(
-                        ((cell.get_coords().1 + 1) as f32) / (unsafe { grid_height } as f32) * 2.0
+                        ((cell.get_coords().1 + 1) as f32) / (config.getGridHeight() as f32) * 2.0
                             - 1.0,
                     );
-                    buffer.push((cell.get_color().0 as f32 / 255.0));
-                    buffer.push((cell.get_color().1 as f32 / 255.0));
-                    buffer.push((cell.get_color().2 as f32 / 255.0));
+                    buffer.push(cell.get_color().0 as f32 / 255.0);
+                    buffer.push(cell.get_color().1 as f32 / 255.0);
+                    buffer.push(cell.get_color().2 as f32 / 255.0);
                 }
 
                 gl::BufferData(
@@ -244,9 +245,9 @@ impl Window {
 
                 self.cell_shader.apply();
                 self.cell_shader
-                    .set_uniform_int("width", unsafe { grid_width } as i32);
+                    .set_uniform_int("width", config.getGridWidth() as i32);
                 self.cell_shader
-                    .set_uniform_int("height", unsafe { grid_height } as i32);
+                    .set_uniform_int("height", config.getGridHeight() as i32);
 
                 gl::DrawArraysInstanced(gl::TRIANGLES, 0, 6, living_cells.len() as i32);
             }
@@ -278,6 +279,12 @@ impl Window {
 impl Drop for Window {
     fn drop(&mut self) {
         unsafe {
+            let ptr = glfw::ffi::glfwGetWindowUserPointer(self.ptr);
+            glfw::ffi::glfwSetWindowUserPointer(self.ptr, 0 as *mut c_void);
+
+            let layout = Layout::new::<Config>();
+            alloc::dealloc(ptr as *mut u8, layout);
+
             glfw::ffi::glfwTerminate();
         }
     }
@@ -289,7 +296,11 @@ extern "C" fn windowCloseCallback(window: *mut glfw::ffi::GLFWwindow) {
     }
 }
 
-extern "C" fn framebufferSizeCallback(window: *mut glfw::ffi::GLFWwindow, width: i32, height: i32) {
+extern "C" fn framebufferSizeCallback(
+    _window: *mut glfw::ffi::GLFWwindow,
+    width: i32,
+    height: i32,
+) {
     unsafe {
         crate::framebuffer_width = width as u32;
         crate::framebuffer_height = height as u32;
@@ -306,9 +317,9 @@ extern "C" fn framebufferSizeCallback(window: *mut glfw::ffi::GLFWwindow, width:
 extern "C" fn keyCallback(
     window: *mut glfw::ffi::GLFWwindow,
     key: i32,
-    scancode: i32,
+    _scancode: i32,
     action: i32,
-    mods: i32,
+    _mods: i32,
 ) {
     if key == glfw::ffi::KEY_R && action == glfw::ffi::PRESS {
         unsafe {
@@ -329,41 +340,16 @@ extern "C" fn keyCallback(
     } else if key == glfw::ffi::KEY_ESCAPE {
         unsafe { glfw::ffi::glfwSetWindowShouldClose(window, glfw::ffi::TRUE) };
     } else if key == glfw::ffi::KEY_S && action == glfw::ffi::PRESS {
-        crate::save_to_file();
     } else if key == glfw::ffi::KEY_C && action == glfw::ffi::PRESS {
-        crate::printConfig();
-    }
-}
+        let ptr = unsafe { glfw::ffi::glfwGetWindowUserPointer(window) };
 
-extern "C" fn mouseButtonCallback(
-    window: *mut glfw::ffi::GLFWwindow,
-    button: i32,
-    action: i32,
-    mods: i32,
-) {
-    unsafe {
-        if action == glfw::ffi::PRESS {
-            let (mut x, mut y) = (0.0, 0.0);
-            glfw::ffi::glfwGetCursorPos(window, &mut x, &mut y);
-
-            if x as u32 <= crate::grid_display_side_length
-                && y as u32 <= crate::grid_display_side_length
-            {
-                let cell_x = ((x as f32 / (grid_display_side_length as f32))
-                    * unsafe { grid_width } as f32) as u32;
-                let cell_y = (((crate::grid_display_side_length - y as u32) as f32
-                    / (grid_display_side_length as f32))
-                    * unsafe { grid_height } as f32) as u32;
-                let cell_index = (*grid_ptr).get_occupant(cell_x, cell_y);
-
-                if cell_index != None {
-                    println!("{:#?}", (*pop_ptr).get_cell(cell_index.unwrap() as usize));
-                }
-
-                let cell_indices = (*grid_ptr).get_in_radius((cell_x, cell_y), 2.0);
-                println!("Cells Found: {}\nCell Locations", cell_indices.len());
-            }
+        if ptr == ptr::null_mut::<c_void>() {
+            todo!()
         }
+
+        let ptr = ptr as *mut Config;
+
+        println!("\n{}\n", unsafe { (*ptr).to_string() });
     }
 }
 

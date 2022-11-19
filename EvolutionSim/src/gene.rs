@@ -163,7 +163,7 @@ mergeEnums!(
 impl Display for NodeID {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut string = String::new();
-        write!(string, "{:?}", *self);
+        write!(string, "{:?}", *self)?;
         f.pad(&string)
     }
 }
