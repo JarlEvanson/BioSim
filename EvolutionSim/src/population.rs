@@ -1,90 +1,153 @@
-use std::{ops::Deref, convert::TryInto};
+use std::{convert::TryInto, mem, ops::Deref};
 
 use rand::Rng;
 
-use crate::{cell::{Cell, DIR}, population_size, grid::Grid, gene::NodeID_COUNT, neuron_presence};
-
+use crate::{
+    cell::{Cell, DIR},
+    gene::NodeID_COUNT,
+    grid::{Grid, GridValueT},
+    neuron_presence, Config,
+};
 
 pub struct Population {
-    size: u32,
+    size: usize,
     cells: Box<[Cell]>,
-    death_queue: Vec<u32>,
-    move_queue: Vec<(usize, u32, u32)>
+    death_queue: Vec<usize>,
+    move_queue: Vec<(usize, GridValueT, GridValueT)>,
 }
 
 impl Population {
-    pub fn new_asexually(size: u32, reproducing_cells: &Vec<&Cell>) -> Population {
-        let mut cells = Vec::with_capacity(size.try_into().unwrap());
+    pub fn new_asexually(config: &Config, reproducing_cells: &Vec<&Cell>) -> Population {
+        let mut cells = Vec::with_capacity(config.getPopSize());
 
         unsafe {
-            for index in 0 .. NodeID_COUNT {
+            for index in 0..NodeID_COUNT {
                 neuron_presence[index] = 0;
             }
         }
+
+        let genomeLength = config.getGenomeSize();
+        let mutationRate = config.getMutationRate();
+        let stepsPerGen = config.getStepsPerGen();
 
         if reproducing_cells.len() > 1 {
-            for index in 0 .. size {
-                cells.push( Cell::asexually_reproduce( reproducing_cells[rand::thread_rng().gen_range(0 .. reproducing_cells.len())], index as usize));
+            for index in 0..config.getPopSize() {
+                cells.push(Cell::asexually_reproduce(
+                    reproducing_cells[rand::thread_rng().gen_range(0..reproducing_cells.len())],
+                    index,
+                    genomeLength,
+                    mutationRate,
+                    stepsPerGen,
+                ));
             }
         } else {
-            for index in 0 .. size {
-                cells.push(Cell::asexually_reproduce( reproducing_cells[0], index as usize));
+            for index in 0..config.getPopSize() {
+                cells.push(Cell::asexually_reproduce(
+                    reproducing_cells[0],
+                    index,
+                    genomeLength,
+                    mutationRate,
+                    stepsPerGen,
+                ));
             }
         }
 
-        Population { size, cells: cells.into_boxed_slice(), death_queue: Vec::new(), move_queue: Vec::new() }
+        Population {
+            size: config.getPopSize(),
+            cells: cells.into_boxed_slice(),
+            death_queue: Vec::new(),
+            move_queue: Vec::new(),
+        }
     }
 
-    pub fn new_sexually(size: u32, reproducing_cells: &Vec<&Cell>) -> Population {
-        let mut cells = Vec::with_capacity(size.try_into().unwrap());
+    pub fn new_sexually(config: &Config, reproducing_cells: &Vec<&Cell>) -> Population {
+        let mut cells = Vec::with_capacity(config.getPopSize());
 
         unsafe {
-            for index in 0 .. NodeID_COUNT {
+            for index in 0..NodeID_COUNT {
                 neuron_presence[index] = 0;
             }
         }
+
+        let genomeLength = config.getGenomeSize();
+        let mutationRate = config.getMutationRate();
+        let stepsPerGen = config.getStepsPerGen();
 
         if reproducing_cells.len() > 1 {
-            for index in 0 .. size {
-                cells.push( Cell::asexually_reproduce( reproducing_cells[rand::thread_rng().gen_range(0 .. reproducing_cells.len())], index as usize));
+            for index in 0..config.getPopSize() {
+                cells.push(Cell::asexually_reproduce(
+                    reproducing_cells[rand::thread_rng().gen_range(0..reproducing_cells.len())],
+                    index,
+                    genomeLength,
+                    mutationRate,
+                    stepsPerGen,
+                ));
             }
         } else {
-            for index in 0 .. size {
-                cells.push(Cell::asexually_reproduce( reproducing_cells[0], index as usize));
+            for index in 0..config.getPopSize() {
+                cells.push(Cell::asexually_reproduce(
+                    reproducing_cells[0],
+                    index,
+                    genomeLength,
+                    mutationRate,
+                    stepsPerGen,
+                ));
             }
         }
 
-        Population { size, cells: cells.into_boxed_slice(), death_queue: Vec::new(), move_queue: Vec::new() }
+        Population {
+            size: config.getPopSize(),
+            cells: cells.into_boxed_slice(),
+            death_queue: Vec::new(),
+            move_queue: Vec::new(),
+        }
     }
 
-    pub fn new(size: u32) -> Population {
-        let mut cells = Vec::with_capacity(size.try_into().unwrap());
+    pub fn new(config: &Config) -> Population {
+        let mut cells = Vec::with_capacity(config.getPopSize());
 
         unsafe {
-            for index in 0 .. NodeID_COUNT {
+            for index in 0..NodeID_COUNT {
                 neuron_presence[index] = 0;
             }
         }
 
-        for index in 0 .. size {
-            cells.push(Cell::random_new(index as usize));
+        let genomeLength = config.getGenomeSize();
+        let stepsPerGen = config.getStepsPerGen();
+
+        for index in 0..config.getPopSize() {
+            cells.push(Cell::random_new(index, genomeLength, stepsPerGen));
         }
 
-        Population { size, cells: cells.into_boxed_slice(), death_queue: Vec::new(), move_queue: Vec::new() }
+        Population {
+            size: config.getPopSize(),
+            cells: cells.into_boxed_slice(),
+            death_queue: Vec::new(),
+            move_queue: Vec::new(),
+        }
     }
 
-    pub fn new_with_cells(size: u32, cells: Box<[Cell]>) -> Population {
-        Population { size, cells, death_queue: Vec::new(), move_queue: Vec::new() }
+    pub fn new_with_cells(size: usize, cells: Box<[Cell]>) -> Population {
+        Population {
+            size,
+            cells,
+            death_queue: Vec::new(),
+            move_queue: Vec::new(),
+        }
     }
 
-    pub fn gen_random(&mut self) {
-        unsafe { 
-            for index in 0 .. NodeID_COUNT {
+    pub fn gen_random(&mut self, config: &Config) {
+        unsafe {
+            for index in 0..NodeID_COUNT {
                 neuron_presence[index] = 0;
             }
         }
-        for index in 0 .. self.size {
-            self.cells[index as usize] = Cell::random_new(index as usize);
+
+        let genomeLength = config.getGenomeSize();
+        let stepsPerGen = config.getStepsPerGen();
+
+        for index in 0..self.size {
+            self.cells[index as usize] = Cell::random_new(index, genomeLength, stepsPerGen);
         }
     }
 
@@ -95,13 +158,17 @@ impl Population {
     pub fn resolve_dead(&mut self, grid: &mut Grid) {
         for i in self.death_queue.iter_mut() {
             self.cells[*i as usize].mark_dead();
-            grid.set_occupant(self.cells[*i as usize].get_coords().0, self.cells[*i as usize].get_coords().1, None);
+            grid.set_occupant(
+                self.cells[*i as usize].get_coords().0,
+                self.cells[*i as usize].get_coords().1,
+                None,
+            );
         }
 
         self.death_queue.clear();
     }
 
-    pub fn add_to_death_queue(&mut self, cell: u32) {
+    pub fn add_to_death_queue(&mut self, cell: usize) {
         self.death_queue.push(cell);
     }
 
@@ -140,7 +207,7 @@ impl Population {
     }
 
     pub fn assign_random(&mut self, grid: &mut Grid) {
-        for index in 0 .. self.size {
+        for index in 0..self.size {
             let coords = grid.find_random_unoccupied();
             (*self.cells)[index as usize].set_coords(coords);
 
@@ -148,12 +215,11 @@ impl Population {
         }
     }
 
-    pub fn add_to_move_queue(&mut self, index: usize, x: u32, y: u32) {
+    pub fn add_to_move_queue(&mut self, index: usize, x: GridValueT, y: GridValueT) {
         self.move_queue.push((index, x, y));
     }
 
     pub fn resolve_movements(&mut self, grid: &mut Grid) {
-    
         for mover in &self.move_queue {
             let cell = &mut self.cells.as_mut()[mover.0];
             if !cell.is_dead() {
@@ -161,24 +227,32 @@ impl Population {
 
                 if (grid.get_occupant(x, y) == None) {
                     grid.set_occupant(cell.get_coords().0, cell.get_coords().1, None);
-                    grid.set_occupant(x, y, Some(cell.get_index() as u32));
+                    grid.set_occupant(x, y, Some(cell.get_index()));
 
-                    cell.set_last_dir(DIR::get_dir_from_offset((x as i32 - (cell.x as i32), y as i32 - (cell.y as i32))));
+                    cell.set_last_dir(DIR::get_dir_from_offset((
+                        x as isize - (cell.x as isize),
+                        y as isize - (cell.y as isize),
+                    )));
 
                     cell.set_coords((x, y));
-                } else if (grid.get_occupant(x, cell.y) == None ) {
+                } else if (grid.get_occupant(x, cell.y) == None) {
                     grid.set_occupant(cell.get_coords().0, cell.get_coords().1, None);
-                    grid.set_occupant(x, cell.y, Some(cell.get_index() as u32));
+                    grid.set_occupant(x, cell.y, Some(cell.get_index()));
 
-                    cell.set_last_dir(DIR::get_dir_from_offset((x as i32 - (cell.x as i32), 0)));
+                    cell.set_last_dir(DIR::get_dir_from_offset((
+                        x as isize - (cell.x as isize),
+                        0,
+                    )));
 
                     cell.set_coords((x, cell.y));
-                } else if (grid.get_occupant(cell.x, y) == None ) {
-                    
+                } else if (grid.get_occupant(cell.x, y) == None) {
                     grid.set_occupant(cell.get_coords().0, cell.get_coords().1, None);
-                    grid.set_occupant(cell.x, y, Some(cell.get_index() as u32));
-                    
-                    cell.set_last_dir(DIR::get_dir_from_offset((0, y as i32 - (cell.y as i32))));
+                    grid.set_occupant(cell.x, y, Some(cell.get_index()));
+
+                    cell.set_last_dir(DIR::get_dir_from_offset((
+                        0,
+                        y as isize - (cell.y as isize),
+                    )));
 
                     cell.set_coords((cell.x, y));
                 }

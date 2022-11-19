@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::{ffi::CString, os::raw::c_char};
 
-use crate::generation;
+use crate::{generation, Config};
 
 extern crate glfw;
 
@@ -12,8 +12,7 @@ use crate::{
     cell::Cell,
     gene::NodeID,
     grid::{self, Grid},
-    grid_display_side_length, grid_height, grid_ptr, grid_width, neuron_presence, pause, pop_ptr,
-    should_reset,
+    grid_display_side_length, grid_ptr, neuron_presence, pause, pop_ptr, should_reset,
     windowed::shader::Shader,
 };
 
@@ -56,8 +55,6 @@ impl Window {
             glfw::ffi::glfwSetFramebufferSizeCallback(ptr, Some(framebufferSizeCallback));
 
             glfw::ffi::glfwSetKeyCallback(ptr, Some(keyCallback));
-
-            glfw::ffi::glfwSetMouseButtonCallback(ptr, Some(mouseButtonCallback));
 
             ptr
         };
@@ -159,7 +156,7 @@ impl Window {
         self.cell_VAO = VAO;
     }
 
-    pub fn render(&self, living_cells: Vec<&Cell>) {
+    pub fn render(&self, config: &Config, living_cells: Vec<&Cell>) {
         unsafe {
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT);
@@ -192,10 +189,10 @@ impl Window {
 
                 for cell in &living_cells {
                     buffer.push(
-                        ((cell.get_coords().0) as f32) / (unsafe { grid_width } as f32) * 2.0 - 1.0,
+                        ((cell.get_coords().0) as f32) / (config.getGridWidth() as f32) * 2.0 - 1.0,
                     );
                     buffer.push(
-                        ((cell.get_coords().1 + 1) as f32) / (unsafe { grid_height } as f32) * 2.0
+                        ((cell.get_coords().1 + 1) as f32) / (config.getGridHeight() as f32) * 2.0
                             - 1.0,
                     );
                     buffer.push((cell.get_color().0 as f32 / 255.0));
@@ -244,9 +241,9 @@ impl Window {
 
                 self.cell_shader.apply();
                 self.cell_shader
-                    .set_uniform_int("width", unsafe { grid_width } as i32);
+                    .set_uniform_int("width", config.getGridWidth() as i32);
                 self.cell_shader
-                    .set_uniform_int("height", unsafe { grid_height } as i32);
+                    .set_uniform_int("height", config.getGridHeight() as i32);
 
                 gl::DrawArraysInstanced(gl::TRIANGLES, 0, 6, living_cells.len() as i32);
             }
@@ -329,41 +326,8 @@ extern "C" fn keyCallback(
     } else if key == glfw::ffi::KEY_ESCAPE {
         unsafe { glfw::ffi::glfwSetWindowShouldClose(window, glfw::ffi::TRUE) };
     } else if key == glfw::ffi::KEY_S && action == glfw::ffi::PRESS {
-        crate::save_to_file();
     } else if key == glfw::ffi::KEY_C && action == glfw::ffi::PRESS {
-        crate::printConfig();
-    }
-}
-
-extern "C" fn mouseButtonCallback(
-    window: *mut glfw::ffi::GLFWwindow,
-    button: i32,
-    action: i32,
-    mods: i32,
-) {
-    unsafe {
-        if action == glfw::ffi::PRESS {
-            let (mut x, mut y) = (0.0, 0.0);
-            glfw::ffi::glfwGetCursorPos(window, &mut x, &mut y);
-
-            if x as u32 <= crate::grid_display_side_length
-                && y as u32 <= crate::grid_display_side_length
-            {
-                let cell_x = ((x as f32 / (grid_display_side_length as f32))
-                    * unsafe { grid_width } as f32) as u32;
-                let cell_y = (((crate::grid_display_side_length - y as u32) as f32
-                    / (grid_display_side_length as f32))
-                    * unsafe { grid_height } as f32) as u32;
-                let cell_index = (*grid_ptr).get_occupant(cell_x, cell_y);
-
-                if cell_index != None {
-                    println!("{:#?}", (*pop_ptr).get_cell(cell_index.unwrap() as usize));
-                }
-
-                let cell_indices = (*grid_ptr).get_in_radius((cell_x, cell_y), 2.0);
-                println!("Cells Found: {}\nCell Locations", cell_indices.len());
-            }
-        }
+        todo!()
     }
 }
 

@@ -9,4 +9,5 @@ glfw = "0.43.0"
 gl = "0.14.0"
 rand = "0.8.5"
 scoped_threadpool = "0.1.*"
+rust-ini = "0.18.0"
 ProcEvolutionSim = { path = "../ProcEvolutionSim" }
