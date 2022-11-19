@@ -29,6 +29,8 @@ use gene::NodeID_COUNT;
 use crate::windowed::window::wait;
 mod neuron;
 
+mod bench;
+
 //Statistics
 static mut neuron_presence: [u32; NodeID_COUNT] = [0; NodeID_COUNT];
 
