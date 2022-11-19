@@ -1,7 +1,5 @@
 use rand::Rng;
 
-use crate::cell::Cell;
-
 pub type GridValueT = usize;
 
 pub struct Grid {
@@ -47,7 +45,7 @@ impl Grid {
             while cx <= right {
                 let occupant = self.grid[cx + cy * self.width];
                 if occupant != None {
-                    in_radius.push(unsafe { occupant.unwrap() });
+                    in_radius.push(occupant.unwrap());
                 }
                 cx += 1;
             }
@@ -63,8 +61,8 @@ impl Grid {
     }
 
     pub fn find_random_unoccupied(&self) -> (usize, usize) {
-        let mut x = 0;
-        let mut y = 0;
+        let mut x;
+        let mut y;
 
         let mut rng = rand::thread_rng();
 

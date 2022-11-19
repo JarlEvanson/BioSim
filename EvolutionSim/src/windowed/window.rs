@@ -1,18 +1,16 @@
 #![allow(temporary_cstring_as_ptr)]
 
-use std::path::PathBuf;
+use std::alloc::{self, Layout};
+use std::ffi::c_void;
+use std::ptr::{self, write};
 use std::{ffi::CString, os::raw::c_char};
 
-use crate::{generation, Config};
+use crate::Config;
 
 extern crate glfw;
 
 use crate::{
-    accounted_time,
-    cell::Cell,
-    gene::NodeID,
-    grid::{self, Grid},
-    grid_display_side_length, grid_ptr, neuron_presence, pause, pop_ptr, should_reset,
+    accounted_time, cell::Cell, gene::NodeID, neuron_presence, pause, should_reset,
     windowed::shader::Shader,
 };
 
@@ -28,7 +26,7 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn createWindow(width: i32, height: i32) -> Option<Window> {
+    pub fn createWindow(config: &Config, width: i32, height: i32) -> Option<Window> {
         let ptr = unsafe {
             glfw::ffi::glfwInit();
 
@@ -55,6 +53,12 @@ impl Window {
             glfw::ffi::glfwSetFramebufferSizeCallback(ptr, Some(framebufferSizeCallback));
 
             glfw::ffi::glfwSetKeyCallback(ptr, Some(keyCallback));
+
+            let layout = Layout::new::<Config>();
+            let configPtr = alloc::alloc(layout) as *mut Config;
+            write(configPtr, config.clone());
+
+            glfw::ffi::glfwSetWindowUserPointer(ptr, configPtr as *mut c_void);
 
             ptr
         };
@@ -195,9 +199,9 @@ impl Window {
                         ((cell.get_coords().1 + 1) as f32) / (config.getGridHeight() as f32) * 2.0
                             - 1.0,
                     );
-                    buffer.push((cell.get_color().0 as f32 / 255.0));
-                    buffer.push((cell.get_color().1 as f32 / 255.0));
-                    buffer.push((cell.get_color().2 as f32 / 255.0));
+                    buffer.push(cell.get_color().0 as f32 / 255.0);
+                    buffer.push(cell.get_color().1 as f32 / 255.0);
+                    buffer.push(cell.get_color().2 as f32 / 255.0);
                 }
 
                 gl::BufferData(
@@ -275,6 +279,12 @@ impl Window {
 impl Drop for Window {
     fn drop(&mut self) {
         unsafe {
+            let ptr = glfw::ffi::glfwGetWindowUserPointer(self.ptr);
+            glfw::ffi::glfwSetWindowUserPointer(self.ptr, 0 as *mut c_void);
+
+            let layout = Layout::new::<Config>();
+            alloc::dealloc(ptr as *mut u8, layout);
+
             glfw::ffi::glfwTerminate();
         }
     }
@@ -286,7 +296,11 @@ extern "C" fn windowCloseCallback(window: *mut glfw::ffi::GLFWwindow) {
     }
 }
 
-extern "C" fn framebufferSizeCallback(window: *mut glfw::ffi::GLFWwindow, width: i32, height: i32) {
+extern "C" fn framebufferSizeCallback(
+    _window: *mut glfw::ffi::GLFWwindow,
+    width: i32,
+    height: i32,
+) {
     unsafe {
         crate::framebuffer_width = width as u32;
         crate::framebuffer_height = height as u32;
@@ -303,9 +317,9 @@ extern "C" fn framebufferSizeCallback(window: *mut glfw::ffi::GLFWwindow, width:
 extern "C" fn keyCallback(
     window: *mut glfw::ffi::GLFWwindow,
     key: i32,
-    scancode: i32,
+    _scancode: i32,
     action: i32,
-    mods: i32,
+    _mods: i32,
 ) {
     if key == glfw::ffi::KEY_R && action == glfw::ffi::PRESS {
         unsafe {
@@ -327,7 +341,15 @@ extern "C" fn keyCallback(
         unsafe { glfw::ffi::glfwSetWindowShouldClose(window, glfw::ffi::TRUE) };
     } else if key == glfw::ffi::KEY_S && action == glfw::ffi::PRESS {
     } else if key == glfw::ffi::KEY_C && action == glfw::ffi::PRESS {
-        todo!()
+        let ptr = unsafe { glfw::ffi::glfwGetWindowUserPointer(window) };
+
+        if ptr == ptr::null_mut::<c_void>() {
+            todo!()
+        }
+
+        let ptr = ptr as *mut Config;
+
+        println!("\n{}\n", unsafe { (*ptr).to_string() });
     }
 }
 

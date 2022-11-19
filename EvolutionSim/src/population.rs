@@ -1,5 +1,3 @@
-use std::{convert::TryInto, mem, ops::Deref};
-
 use rand::Rng;
 
 use crate::{
@@ -185,7 +183,7 @@ impl Population {
 
     pub fn get_living_cells(&self) -> Vec<&Cell> {
         let mut living = Vec::new();
-        for (index, cell) in (*self.cells).iter().enumerate() {
+        for cell in (*self.cells).iter() {
             if !(*cell).is_dead() {
                 living.push(cell);
             }
@@ -225,7 +223,7 @@ impl Population {
             if !cell.is_dead() {
                 let (x, y) = (mover.1, mover.2);
 
-                if (grid.get_occupant(x, y) == None) {
+                if grid.get_occupant(x, y) == None {
                     grid.set_occupant(cell.get_coords().0, cell.get_coords().1, None);
                     grid.set_occupant(x, y, Some(cell.get_index()));
 
@@ -235,7 +233,7 @@ impl Population {
                     )));
 
                     cell.set_coords((x, y));
-                } else if (grid.get_occupant(x, cell.y) == None) {
+                } else if grid.get_occupant(x, cell.y) == None {
                     grid.set_occupant(cell.get_coords().0, cell.get_coords().1, None);
                     grid.set_occupant(x, cell.y, Some(cell.get_index()));
 
@@ -245,7 +243,7 @@ impl Population {
                     )));
 
                     cell.set_coords((x, cell.y));
-                } else if (grid.get_occupant(cell.x, y) == None) {
+                } else if grid.get_occupant(cell.x, y) == None {
                     grid.set_occupant(cell.get_coords().0, cell.get_coords().1, None);
                     grid.set_occupant(cell.x, y, Some(cell.get_index()));
 

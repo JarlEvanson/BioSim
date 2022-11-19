@@ -1,30 +1,17 @@
-#![allow(
-    non_snake_case,
-    non_upper_case_globals,
-    unused,
-    temporary_cstring_as_ptr
-)]
+#![allow(non_snake_case, non_upper_case_globals, temporary_cstring_as_ptr)]
 #![feature(trace_macros)]
 
-use std::{
-    fmt::Write,
-    fs::File,
-    io::Read,
-    ops::{Add, Deref, DerefMut},
-    path::{Path, PathBuf},
-    process::exit,
-    rc::Rc,
-    slice::{Chunks, ChunksMut},
-    sync::{mpsc::Sender, Arc, RwLock},
-    thread::sleep,
-};
+use std::slice::{Chunks, ChunksMut};
+use std::{process::exit, rc::Rc};
+
+extern crate ProcEvolutionSim;
 
 extern crate rand;
 
-mod windowed;
-
-use rand::Rng;
+extern crate scoped_threadpool;
 use scoped_threadpool::Pool;
+
+mod windowed;
 use windowed::window::Window;
 
 mod grid;
@@ -34,17 +21,12 @@ mod population;
 use population::Population;
 
 mod cell;
-use cell::Cell;
 
 mod gene;
-use gene::{Gene, NodeID, NodeID_COUNT, INNER_NODE_COUNT, INPUT_NODE_COUNT, OUTPUT_NODE_COUNT};
+use gene::NodeID_COUNT;
 
 use crate::windowed::window::wait;
 mod neuron;
-
-extern crate scoped_threadpool;
-
-extern crate ProcEvolutionSim;
 
 //Statistics
 static mut neuron_presence: [u32; NodeID_COUNT] = [0; NodeID_COUNT];
@@ -74,13 +56,9 @@ type TimeT = usize;
 fn main() {
     println!("The argument file=\"path\" will load the save");
 
-    let config: Config = Rc::new(ConfigBase::default());
+    let config: Config = Rc::new(ConfigBase::initFromArgs());
 
     println!("{}", config);
-
-    let mut config_file: Option<usize> = None;
-
-    let mut windowing: bool = true;
 
     unsafe {
         let grid_layout = std::alloc::Layout::new::<Grid>();
@@ -89,24 +67,17 @@ fn main() {
         let pop_layout = std::alloc::Layout::new::<Population>();
         pop_ptr = std::alloc::alloc(pop_layout) as *mut Population;
 
-        let pop = Population::new(&config);
-        std::ptr::write(pop_ptr, pop);
-
-        let grid = Grid::new(1, 1);
-        std::ptr::write(grid_ptr, grid);
+        std::ptr::write(pop_ptr, Population::new(&config));
+        std::ptr::write(
+            grid_ptr,
+            Grid::new(config.getGridWidth(), config.getGridHeight()),
+        );
     }
 
-    if config_file == None {
-        unsafe {
-            (*grid_ptr) = Grid::new(config.getGridWidth(), config.getGridHeight());
-            (*pop_ptr) = Population::new(&config);
-        };
-    }
-
-    if windowing {
+    if config.getIsWindowing() {
         println!("Press R to reset simulation\nPress SPACE to pause and restart simulation\nPress E to print current neuron frequencies\nPress Escape to close window\nPress S to save current generation's genes");
 
-        let window = Window::createWindow(512, 512).expect("Window failed to be created");
+        let window = Window::createWindow(&config, 512, 512).expect("Window failed to be created");
         unsafe {
             framebuffer_width = 512;
             framebuffer_height = 512;
@@ -115,8 +86,6 @@ fn main() {
         window.make_current();
 
         unsafe { (*pop_ptr).assign_random(&mut *grid_ptr) };
-
-        let mut gen: u32 = 0;
 
         window.render(&config, unsafe { &*pop_ptr }.get_living_cells());
 
@@ -223,8 +192,6 @@ fn main() {
     } else {
         unsafe { (*pop_ptr).assign_random(&mut *grid_ptr) };
 
-        let mut gen: u32 = 0;
-
         let mut threadpool = Pool::new(std::thread::available_parallelism().unwrap().get() as u32);
 
         loop {
@@ -294,7 +261,7 @@ fn main() {
 }
 
 pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Population) {
-    let living = unsafe { &*pop_ptr }.get_living_indices();
+    let living = pop.get_living_indices();
 
     let mut results = vec![(0 as usize, (0 as GridValueT, 0 as GridValueT)); living.len()];
 
@@ -305,7 +272,7 @@ pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Popula
             living.len() % (threads as usize),
         );
 
-        let mut results = results.as_mut_slice();
+        let results = results.as_mut_slice();
         results.chunks_mut(if rem != 0 { num + 1 } else { num })
     };
 
@@ -361,7 +328,7 @@ pub fn determine_reproducers(config: &Config, pop: &Population) -> Vec<usize> {
 pub fn determine_deaths(config: &Config, pop: &mut Population) {
     if unsafe { steps } == config.getStepsPerGen() / 4 {
         for index in &pop.get_living_indices() {
-            let (x, y) = pop.get_cell(*index).get_coords();
+            let (x, _) = pop.get_cell(*index).get_coords();
 
             if x < config.getGridWidth() / 4 || x > (3 * config.getGridWidth()) / 4 {
                 pop.add_to_death_queue(*index)
@@ -369,7 +336,7 @@ pub fn determine_deaths(config: &Config, pop: &mut Population) {
         }
     } else if unsafe { steps } == config.getStepsPerGen() / 2 {
         for index in &pop.get_living_indices() {
-            let (x, y) = pop.get_cell(*index).get_coords();
+            let (x, _) = pop.get_cell(*index).get_coords();
 
             if x > config.getGridWidth() / 4 && x < (3 * config.getGridWidth()) / 4 {
                 pop.add_to_death_queue(*index)
@@ -377,7 +344,7 @@ pub fn determine_deaths(config: &Config, pop: &mut Population) {
         }
     } else if unsafe { steps } == (3 * config.getStepsPerGen()) / 4 {
         for index in &pop.get_living_indices() {
-            let (x, y) = pop.get_cell(*index).get_coords();
+            let (x, _) = pop.get_cell(*index).get_coords();
 
             if x < config.getGridWidth() / 4 || x > (3 * config.getGridWidth()) / 4 {
                 pop.add_to_death_queue(*index)

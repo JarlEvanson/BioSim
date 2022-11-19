@@ -1,10 +1,8 @@
-use std::fmt::{write, Debug};
+use std::fmt::Debug;
 use std::ops::Deref;
 
 use crate::gene::{Gene, NodeID, INNER_NODE_COUNT, INPUT_NODE_COUNT, OUTPUT_NODE_COUNT};
 use crate::neuron_presence;
-
-use rand::{thread_rng, Rng};
 
 pub struct NeuralNet {
     neurons: Box<[Neuron]>,
@@ -71,10 +69,10 @@ impl NeuralNet {
             for connection_index in 0..connections.len() {
                 let mut duplicate_location = None;
                 for search_index in 0..non_duplicated_connections.len() {
-                    if (connections[connection_index].input
+                    if connections[connection_index].input
                         == non_duplicated_connections[search_index].input
                         && connections[connection_index].output
-                            == non_duplicated_connections[search_index].output)
+                            == non_duplicated_connections[search_index].output
                     {
                         duplicate_location = Some(search_index);
                     }
@@ -148,6 +146,8 @@ impl NeuralNet {
     //Index 1: Y value
     //Index 2: Age
     pub fn feed_forward(&mut self, sensor_values: &Vec<f32>) {
+        self.clear();
+
         for neuron in self.neurons.as_mut() {
             match neuron.variant {
                 NodeID::DistX => neuron.value = sensor_values[NodeID::DistX.get_index()],
@@ -247,12 +247,11 @@ struct Connection {
 
 impl Debug for NeuralNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "\n\tNeurons: [\n");
+        write!(f, "\n\tNeurons: [\n")?;
         for neuron in self.neurons.deref() {
-            write!(f, "\t  {:10}: {}\n", neuron.variant, neuron.value);
+            write!(f, "\t  {:10}: {}\n", neuron.variant, neuron.value)?;
         }
-        write!(f, "\t],");
-        write!(f, "\n\tConnections: [\n");
+        write!(f, "\t],\n\tConnections: [\n")?;
         for (index, connection) in self.connections.deref().into_iter().enumerate() {
             write!(
                 f,
@@ -261,9 +260,9 @@ impl Debug for NeuralNet {
                 self.neurons[connection.input].variant,
                 self.neurons[connection.output].variant,
                 connection.weight
-            );
+            )?;
         }
-        write!(f, "\t]");
+        write!(f, "\t]")?;
         Ok(())
     }
 }

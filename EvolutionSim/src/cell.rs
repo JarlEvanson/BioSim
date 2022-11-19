@@ -1,4 +1,4 @@
-use std::{convert::TryInto, f32::consts::E, fmt::Write};
+use std::fmt::Write;
 
 use rand::{thread_rng, Rng};
 
@@ -7,7 +7,7 @@ use crate::{
     gene::{Gene, NodeID, NodeType, INNER_NODE_COUNT, INPUT_NODE_COUNT},
     grid::GridValueT,
     neuron::NeuralNet,
-    steps, Config, TimeT,
+    steps, TimeT,
 };
 
 #[derive(Debug)]
@@ -27,7 +27,7 @@ impl Cell {
     pub fn random_new(index: usize, genomeSize: usize, stepsPerGen: TimeT) -> Cell {
         let mut genome = Vec::new();
 
-        for gene in 0..genomeSize {
+        for _ in 0..genomeSize {
             genome.push(Gene::new_random());
         }
 
@@ -67,21 +67,17 @@ impl Cell {
             if thread_rng().gen_bool(0.5) {
                 if thread_rng().gen_range(0.0 as f32..100.0) < mutationRate {
                     let bit = thread_rng().gen_range(0..32 as u32);
-                    unsafe {
-                        (*new_genes)[i as usize] = (*cell1.genome)[i as usize] ^ (1 << (bit & 31));
-                    }
+                    (*new_genes)[i as usize] = (*cell1.genome)[i as usize] ^ (1 << (bit & 31));
                 }
             } else {
                 if thread_rng().gen_range(0.0 as f32..100.0) < mutationRate {
                     let bit = thread_rng().gen_range(0..32 as u32);
-                    unsafe {
-                        (*new_genes)[i as usize] = (*cell2.genome)[i as usize] ^ (1 << (bit & 31));
-                    }
+                    (*new_genes)[i as usize] = (*cell2.genome)[i as usize] ^ (1 << (bit & 31));
                 }
             }
         }
 
-        let mut oscillator = 0;
+        let mut oscillator;
 
         if thread_rng().gen_bool(0.5) {
             oscillator = cell1.oscillator_period;
@@ -91,9 +87,7 @@ impl Cell {
 
         if thread_rng().gen_range(0.0 as f32..100.0) < mutationRate {
             let bit = thread_rng().gen_range(0..32 as u32);
-            unsafe {
-                oscillator = oscillator ^ (1 << (bit & 31));
-            }
+            oscillator = oscillator ^ (1 << (bit & 31));
         }
 
         let new_genes = new_genes.into_boxed_slice();
@@ -124,9 +118,7 @@ impl Cell {
 
         if thread_rng().gen_range(0.0 as f32..100.0) < mutationRate {
             let bit = thread_rng().gen_range(0..32 as u32);
-            unsafe {
-                oscillator = oscillator ^ (1 << (bit & 31));
-            }
+            oscillator = oscillator ^ (1 << (bit & 31));
         }
 
         Cell::new(new_genes, oscillator, index, stepsPerGen)
@@ -183,8 +175,8 @@ impl Cell {
             + outputs[NodeID::get_index(&NodeID::MoveRight) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
                 * self.last_move_dir.rotateCW90().get_move_offset().1;
 
-        x.tanh();
-        y.tanh();
+        x = x.tanh();
+        y = y.tanh();
 
         let mut coords = (self.x, self.y);
 
@@ -244,11 +236,11 @@ impl Cell {
         const maxColorVal: u32 = 0xb0;
         const maxLumaVal: u32 = 0xb0;
 
-        let mut color = unsafe {
-            let c: u32 = u32::from((genome.first().unwrap().get_head_type() == NodeType::INPUT))
-                | (u32::from((genome.last().unwrap().get_head_type() == NodeType::INPUT)) << 1)
-                | (u32::from((genome.first().unwrap().get_tail_type() == NodeType::INNER)) << 2)
-                | (u32::from((genome.last().unwrap().get_tail_type() == NodeType::INNER)) << 3)
+        let mut color = {
+            let c: u32 = u32::from(genome.first().unwrap().get_head_type() == NodeType::INPUT)
+                | (u32::from(genome.last().unwrap().get_head_type() == NodeType::INPUT) << 1)
+                | (u32::from(genome.first().unwrap().get_tail_type() == NodeType::INNER) << 2)
+                | (u32::from(genome.last().unwrap().get_tail_type() == NodeType::INNER) << 3)
                 | (((genome.first().unwrap().get_head_node_id().get_index() & 1) as u32) << 4)
                 | (((genome.first().unwrap().get_tail_node_id().get_index() & 1) as u32) << 5)
                 | (((genome.last().unwrap().get_head_node_id().get_index() & 1) as u32) << 6)
@@ -285,11 +277,11 @@ impl Cell {
     }
 
     pub fn serialize(&self, output: &mut String) {
-        write!(output, "{} ", self.get_oscillator_period());
+        write!(output, "{} ", self.get_oscillator_period()).expect("Failed to serialize cell");
         for gene in self.get_genome().into_iter() {
-            write!(output, "{:08x} ", gene.gene);
+            write!(output, "{:08x} ", gene.gene).expect("Failed to serialize cell");
         }
-        write!(output, "\n");
+        write!(output, "\n").expect("Failed to serialize cell");
     }
 }
 
