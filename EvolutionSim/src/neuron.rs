@@ -207,8 +207,8 @@ impl NeuralNet {
         }
     }
 
-    pub fn get_outputs(&self) -> Vec<f32> {
-        let mut outputs = vec![0.0; OUTPUT_NODE_COUNT as usize];
+    pub fn get_outputs(&self) -> [f64; OUTPUT_NODE_COUNT] {
+        let mut outputs = [0.0; OUTPUT_NODE_COUNT as usize];
 
         for neuron in self.neurons.deref() {
             if neuron.variant.is_output() {
@@ -228,7 +228,11 @@ impl NeuralNet {
 }
 
 fn activation(value: f32) -> f32 {
-    value.tanh()
+    if value <= 0.0 {
+        0.0
+    } else {
+        value
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

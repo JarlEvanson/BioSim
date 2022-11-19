@@ -52,7 +52,11 @@ impl Config {
 
         let mut next = None;
 
-        for argument in std::env::args() {
+        let mut args = std::env::args();
+        //Drops naming, useless right now
+        args.next();
+
+        for argument in args {
             match next {
                 Some(opt) => {
                     match opt {
@@ -79,7 +83,7 @@ impl Config {
                 None => {
                     if argument.eq("-w") {
                         config.isWindowing = true;
-                    } else if argument.eq("--pop-size") || argument.eq("-p") {
+                    } else if argument.eq("--population-size") || argument.eq("-p") {
                         next = Some(Next::PopSize)
                     } else if argument.eq("--width") {
                         next = Some(Next::GridWidth);
@@ -87,10 +91,12 @@ impl Config {
                         next = Some(Next::GridHeight);
                     } else if argument.eq("-g") || argument.eq("--genome-length") {
                         next = Some(Next::GenomeLength);
-                    } else if argument.eq("-m") || argument.eq("--mutatation") {
+                    } else if argument.eq("-m") || argument.eq("--mutatation-rate") {
                         next = Some(Next::MutationRate);
-                    } else if argument.eq("-s") || argument.eq("--steps") {
+                    } else if argument.eq("-s") || argument.eq("--steps-per-gen") {
                         next = Some(Next::StepsPerGen);
+                    } else {
+                        panic!("Invalid Option");
                     }
                 }
             }

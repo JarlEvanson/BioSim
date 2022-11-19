@@ -276,7 +276,7 @@ pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Popula
         results.chunks_mut(if rem != 0 { num + 1 } else { num })
     };
 
-    let chunks: Chunks<usize> = {
+    let mut chunks: Chunks<usize> = {
         let threads = threadpool.thread_count();
         let (num, rem) = (
             living.len() / (threads as usize),
@@ -292,6 +292,9 @@ pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Popula
     let stepsPerGen = config.getStepsPerGen();
 
     threadpool.scoped(|scope| {
+        let localChunk = chunks.next().unwrap();
+        let localResults = resChunks.next().unwrap();
+
         for chunk in chunks {
             let resChunk = resChunks.next().unwrap();
             scope.execute(move || {
@@ -304,6 +307,15 @@ pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Popula
                     resChunk[index] = (*cellIndex, coords);
                 }
             });
+        }
+
+        for (index, cellIndex) in localChunk.into_iter().enumerate() {
+            let coords = unsafe { &mut *pop_ptr }.get_mut_cell(*cellIndex).one_step(
+                gridWidth,
+                gridHeight,
+                stepsPerGen,
+            );
+            localResults[index] = (*cellIndex, coords);
         }
     });
 
@@ -352,6 +364,10 @@ pub fn determine_deaths(config: &Config, pop: &mut Population) {
         }
     }
     if pop.get_death_queue_len() > 0 {
-        println!("Killed: {}", pop.get_death_queue_len());
+        println!(
+            "Step {} Killed: {}",
+            unsafe { steps },
+            pop.get_death_queue_len()
+        );
     }
 }
