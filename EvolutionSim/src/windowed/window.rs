@@ -9,6 +9,7 @@ use crate::Config;
 
 extern crate glfw;
 
+use crate::population::Population;
 use crate::{
     accounted_time, cell::Cell, gene::NodeID, neuron_presence, pause, should_reset,
     windowed::shader::Shader,
@@ -160,7 +161,7 @@ impl Window {
         self.cell_VAO = VAO;
     }
 
-    pub fn render(&self, config: &Config, living_cells: Vec<&Cell>) {
+    pub fn render(&self, config: &Config, population: &Population) {
         unsafe {
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT);
@@ -191,17 +192,33 @@ impl Window {
                     0.0, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, -1.0, 0.0, -1.0,
                 ];
 
-                for cell in &living_cells {
+                let livingCells = {
+                    let indices = population.getLivingIndices();
+                    let mut living = Vec::with_capacity(indices.len());
+                    for index in indices {
+                        living.push((
+                            population.getCellMovementData(index),
+                            population.getCellOtherData(index),
+                        ));
+                    }
+                    living
+                };
+
+                let len = livingCells.len();
+
+                for (movement, other) in livingCells {
                     buffer.push(
-                        ((cell.get_coords().0) as f32) / (config.getGridWidth() as f32) * 2.0 - 1.0,
-                    );
-                    buffer.push(
-                        ((cell.get_coords().1 + 1) as f32) / (config.getGridHeight() as f32) * 2.0
+                        ((movement.getCoords().0) as f32) / (config.getGridWidth() as f32) * 2.0
                             - 1.0,
                     );
-                    buffer.push(cell.get_color().0 as f32 / 255.0);
-                    buffer.push(cell.get_color().1 as f32 / 255.0);
-                    buffer.push(cell.get_color().2 as f32 / 255.0);
+                    buffer.push(
+                        ((movement.getCoords().1 + 1) as f32) / (config.getGridHeight() as f32)
+                            * 2.0
+                            - 1.0,
+                    );
+                    buffer.push(other.color.0 as f32 / 255.0);
+                    buffer.push(other.color.1 as f32 / 255.0);
+                    buffer.push(other.color.2 as f32 / 255.0);
                 }
 
                 gl::BufferData(
@@ -249,7 +266,7 @@ impl Window {
                 self.cell_shader
                     .set_uniform_int("height", config.getGridHeight() as i32);
 
-                gl::DrawArraysInstanced(gl::TRIANGLES, 0, 6, living_cells.len() as i32);
+                gl::DrawArraysInstanced(gl::TRIANGLES, 0, 6, len as i32);
             }
 
             glfw::ffi::glfwSwapBuffers(self.ptr);

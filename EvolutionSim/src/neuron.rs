@@ -207,7 +207,7 @@ impl NeuralNet {
         }
     }
 
-    pub fn get_outputs(&self) -> [f64; OUTPUT_NODE_COUNT] {
+    pub fn get_outputs(&self) -> [f32; OUTPUT_NODE_COUNT] {
         let mut outputs = [0.0; OUTPUT_NODE_COUNT as usize];
 
         for neuron in self.neurons.deref() {

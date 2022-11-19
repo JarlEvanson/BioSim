@@ -1,4 +1,4 @@
-use std::{fmt::Display, process::exit, str};
+use std::{fmt::Display, process::exit};
 
 use crate::{grid::GridValueT, TimeT};
 

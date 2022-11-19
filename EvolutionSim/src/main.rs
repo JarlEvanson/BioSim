@@ -1,5 +1,6 @@
 #![allow(non_snake_case, non_upper_case_globals, temporary_cstring_as_ptr)]
-#![feature(trace_macros)]
+#![feature(trace_macros, new_uninit)]
+#![feature(test)]
 
 use std::slice::{Chunks, ChunksMut};
 use std::{process::exit, rc::Rc};
@@ -85,9 +86,9 @@ fn main() {
         }
         window.make_current();
 
-        unsafe { (*pop_ptr).assign_random(&mut *grid_ptr) };
+        unsafe { (*pop_ptr).assignRandom(&mut *grid_ptr) };
 
-        window.render(&config, unsafe { &*pop_ptr }.get_living_cells());
+        window.render(&config, unsafe { &*pop_ptr });
 
         unsafe {
             accounted_time = glfw::ffi::glfwGetTime();
@@ -107,16 +108,16 @@ fn main() {
                     should_reset = false;
                 }
 
-                unsafe { &mut *pop_ptr }.gen_random(&config);
+                unsafe { &mut *pop_ptr }.genRandom(&config);
             }
 
             if unsafe { steps == 0 } && !outputted {
                 unsafe {
                     (*grid_ptr).reset();
                 }
-                unsafe { &mut *pop_ptr }.assign_random(unsafe { &mut *grid_ptr });
+                unsafe { &mut *pop_ptr }.assignRandom(unsafe { &mut *grid_ptr });
 
-                window.render(&config, unsafe { &*pop_ptr }.get_living_cells());
+                window.render(&config, unsafe { &*pop_ptr });
 
                 println!("Generation {}:", unsafe { generation });
 
@@ -130,14 +131,14 @@ fn main() {
                     steps += 1;
                 };
 
-                computeMovements(&config, &mut threadpool, unsafe { &mut *pop_ptr });
-                unsafe { &mut *pop_ptr }.resolve_movements(unsafe { &mut *grid_ptr });
+                let size = computeMovements(&config, &mut threadpool, unsafe { &mut *pop_ptr });
+                unsafe { &mut *pop_ptr }.resolveMoveQueue(size, unsafe { &mut *grid_ptr });
 
                 determine_deaths(&config, unsafe { &mut *pop_ptr });
-                unsafe { &mut *pop_ptr }.resolve_dead(unsafe { &mut *grid_ptr });
+                unsafe { &mut *pop_ptr }.resolveDead(unsafe { &mut *grid_ptr });
 
-                if unsafe { &mut *pop_ptr }.get_living_indices().len() == 0 {
-                    println!("Failed to produce viable offspring");
+                if unsafe { &mut *pop_ptr }.getLivingIndices().len() == 0 {
+                    println!("Everyone Died");
                     loop {
                         window.poll();
                         if window.shouldClose() || unsafe { should_reset } {
@@ -148,7 +149,7 @@ fn main() {
                     continue;
                 }
 
-                window.render(&config, unsafe { &*pop_ptr }.get_living_cells());
+                window.render(&config, unsafe { &*pop_ptr });
             }
 
             if unsafe { steps } == config.getStepsPerGen() {
@@ -167,30 +168,23 @@ fn main() {
 
                 println!(
                     "Dead: {:3}\tReproducing: {:3}\tLiving Non-reproducing: {:3}",
-                    config.getPopSize() - unsafe { &*pop_ptr }.get_living_indices().len(),
+                    config.getPopSize() - unsafe { &*pop_ptr }.getLivingIndices().len(),
                     reproducers.len(),
-                    unsafe { &*pop_ptr }.get_living_indices().len() - reproducers.len(),
+                    unsafe { &*pop_ptr }.getLivingIndices().len() - reproducers.len(),
                 );
 
-                wait(&window, 2.0);
-
                 unsafe {
-                    *pop_ptr = {
-                        let mut reproducing_cells = Vec::new();
-                        for index in reproducers {
-                            reproducing_cells.push((&*pop_ptr).get_cell(index));
-                        }
-
-                        Population::new_asexually(&config, &reproducing_cells)
-                    };
+                    (*pop_ptr).reproduceAsexually(&config, reproducers);
                 }
+
+                //wait(&window, 2.0);
 
                 unsafe { steps = 0 };
                 unsafe { generation += 1 };
             }
         }
     } else {
-        unsafe { (*pop_ptr).assign_random(&mut *grid_ptr) };
+        unsafe { (*pop_ptr).assignRandom(&mut *grid_ptr) };
 
         let mut threadpool = Pool::new(std::thread::available_parallelism().unwrap().get() as u32);
 
@@ -202,14 +196,14 @@ fn main() {
                     should_reset = false;
                 }
 
-                unsafe { &mut *pop_ptr }.gen_random(&config);
+                unsafe { &mut *pop_ptr }.genRandom(&config);
             }
 
             if unsafe { steps == 0 } {
                 unsafe {
                     (*grid_ptr).reset();
                 }
-                unsafe { &mut *pop_ptr }.assign_random(unsafe { &mut *grid_ptr });
+                unsafe { &mut *pop_ptr }.assignRandom(unsafe { &mut *grid_ptr });
 
                 println!("Generation {}:", unsafe { generation });
             }
@@ -219,11 +213,13 @@ fn main() {
                     steps += 1;
                 };
 
-                computeMovements(&config, &mut threadpool, unsafe { &mut *pop_ptr });
-                unsafe { &mut *pop_ptr }.resolve_movements(unsafe { &mut *grid_ptr });
+                println!("{:?}", unsafe { &*pop_ptr });
+
+                let size = computeMovements(&config, &mut threadpool, unsafe { &mut *pop_ptr });
+                unsafe { &mut *pop_ptr }.resolveMoveQueue(size, unsafe { &mut *grid_ptr });
 
                 determine_deaths(&config, unsafe { &mut *pop_ptr });
-                unsafe { &mut *pop_ptr }.resolve_dead(unsafe { &mut *grid_ptr });
+                unsafe { &mut *pop_ptr }.resolveDead(unsafe { &mut *grid_ptr });
             }
 
             if unsafe { steps } == config.getStepsPerGen() {
@@ -237,20 +233,13 @@ fn main() {
 
                 println!(
                     "Dead: {:3}\tReproducing: {:3}\tLiving Non-reproducing: {:3}",
-                    config.getPopSize() - unsafe { &*pop_ptr }.get_living_indices().len(),
+                    config.getPopSize() - unsafe { &*pop_ptr }.getLivingIndices().len(),
                     reproducers.len(),
-                    unsafe { &*pop_ptr }.get_living_indices().len() - reproducers.len(),
+                    unsafe { &*pop_ptr }.getLivingIndices().len() - reproducers.len(),
                 );
 
                 unsafe {
-                    *pop_ptr = {
-                        let mut reproducing_cells = Vec::new();
-                        for index in reproducers {
-                            reproducing_cells.push((&*pop_ptr).get_cell(index));
-                        }
-
-                        Population::new_asexually(&config, &reproducing_cells)
-                    };
+                    (*pop_ptr).reproduceAsexually(&config, reproducers);
                 }
 
                 unsafe { steps = 0 };
@@ -260,32 +249,28 @@ fn main() {
     }
 }
 
-pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Population) {
-    let living = pop.get_living_indices();
+pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Population) -> usize {
+    let living = pop.getLivingIndices();
 
-    let mut results = vec![(0 as usize, (0 as GridValueT, 0 as GridValueT)); living.len()];
+    let results = pop.getMutMoveQueue();
 
-    let mut resChunks: ChunksMut<(usize, (GridValueT, GridValueT))> = {
+    let parts = {
         let threads = threadpool.thread_count();
         let (num, rem) = (
-            living.len() / (threads as usize),
-            living.len() % (threads as usize),
+            living.len() / ((threads + 1) as usize),
+            living.len() % ((threads + 1) as usize),
         );
 
-        let results = results.as_mut_slice();
-        results.chunks_mut(if rem != 0 { num + 1 } else { num })
+        if rem != 0 {
+            num + 1
+        } else {
+            num
+        }
     };
 
-    let mut chunks: Chunks<usize> = {
-        let threads = threadpool.thread_count();
-        let (num, rem) = (
-            living.len() / (threads as usize),
-            living.len() % (threads as usize),
-        );
+    let mut chunks: Chunks<usize> = living.as_slice().chunks(parts);
 
-        let x = living.as_slice();
-        x.chunks(if rem != 0 { num + 1 } else { num })
-    };
+    let mut resChunks: ChunksMut<(usize, (GridValueT, GridValueT))> = results.chunks_mut(parts);
 
     let gridWidth = config.getGridWidth();
     let gridHeight = config.getGridHeight();
@@ -299,38 +284,36 @@ pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Popula
             let resChunk = resChunks.next().unwrap();
             scope.execute(move || {
                 for (index, cellIndex) in chunk.into_iter().enumerate() {
-                    let coords = unsafe { &mut *pop_ptr }.get_mut_cell(*cellIndex).one_step(
-                        gridWidth,
-                        gridHeight,
-                        stepsPerGen,
-                    );
+                    let movement = unsafe { &mut *pop_ptr }.getCellMovementData(*cellIndex);
+                    let neurons = unsafe { &mut *pop_ptr }.getCellMutNeuronData(*cellIndex);
+
+                    let coords =
+                        cell::oneStep((neurons, movement), gridWidth, gridHeight, stepsPerGen);
                     resChunk[index] = (*cellIndex, coords);
                 }
             });
         }
 
         for (index, cellIndex) in localChunk.into_iter().enumerate() {
-            let coords = unsafe { &mut *pop_ptr }.get_mut_cell(*cellIndex).one_step(
-                gridWidth,
-                gridHeight,
-                stepsPerGen,
-            );
+            let movement = unsafe { &mut *pop_ptr }.getCellMovementData(*cellIndex);
+            let neurons = unsafe { &mut *pop_ptr }.getCellMutNeuronData(*cellIndex);
+
+            let coords = cell::oneStep((neurons, movement), gridWidth, gridHeight, stepsPerGen);
             localResults[index] = (*cellIndex, coords);
         }
     });
 
-    for (index, (x, y)) in results {
-        unsafe { &mut *pop_ptr }.add_to_move_queue(index, x, y);
-    }
+    living.len()
 }
 
 pub fn determine_reproducers(config: &Config, pop: &Population) -> Vec<usize> {
     let mut reproducers = Vec::new();
-    for cell in pop.get_living_cells() {
-        if cell.get_coords().0 < config.getGridWidth() / 4
-            || cell.get_coords().0 > 3 * config.getGridWidth() / 4
+    for cellIndex in pop.getLivingIndices() {
+        let cell = pop.getCellMovementData(cellIndex);
+        if cell.getCoords().0 < config.getGridWidth() / 4
+            || cell.getCoords().0 > 3 * config.getGridWidth() / 4
         {
-            reproducers.push(cell.get_index());
+            reproducers.push(cellIndex);
         }
     }
 
@@ -339,35 +322,41 @@ pub fn determine_reproducers(config: &Config, pop: &Population) -> Vec<usize> {
 
 pub fn determine_deaths(config: &Config, pop: &mut Population) {
     if unsafe { steps } == config.getStepsPerGen() / 4 {
-        for index in &pop.get_living_indices() {
-            let (x, _) = pop.get_cell(*index).get_coords();
+        for index in &pop.getLivingIndices() {
+            let (x, _) = pop.getCellMovementData(*index).getCoords();
 
             if x < config.getGridWidth() / 4 || x > (3 * config.getGridWidth()) / 4 {
-                pop.add_to_death_queue(*index)
+                pop.addToDeathQueue(*index)
             }
         }
     } else if unsafe { steps } == config.getStepsPerGen() / 2 {
-        for index in &pop.get_living_indices() {
-            let (x, _) = pop.get_cell(*index).get_coords();
+        for index in &pop.getLivingIndices() {
+            let (x, _) = pop.getCellMovementData(*index).getCoords();
 
             if x > config.getGridWidth() / 4 && x < (3 * config.getGridWidth()) / 4 {
-                pop.add_to_death_queue(*index)
+                pop.addToDeathQueue(*index)
             }
         }
     } else if unsafe { steps } == (3 * config.getStepsPerGen()) / 4 {
-        for index in &pop.get_living_indices() {
-            let (x, _) = pop.get_cell(*index).get_coords();
+        for index in &pop.getLivingIndices() {
+            let (x, _) = pop.getCellMovementData(*index).getCoords();
 
             if x < config.getGridWidth() / 4 || x > (3 * config.getGridWidth()) / 4 {
-                pop.add_to_death_queue(*index)
+                pop.addToDeathQueue(*index)
             }
         }
     }
-    if pop.get_death_queue_len() > 0 {
+    /*
+    println!(
+        "{:?} {}",
+        unsafe { &*pop_ptr },
+        unsafe { &*pop_ptr }.getLivingIndices().len()
+    ); */
+    if pop.getDeathQueueLen() > 0 {
         println!(
             "Step {} Killed: {}",
             unsafe { steps },
-            pop.get_death_queue_len()
+            pop.getDeathQueueLen()
         );
     }
 }
