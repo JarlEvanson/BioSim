@@ -11,8 +11,7 @@ extern crate glfw;
 
 use crate::population::Population;
 use crate::{
-    accounted_time, cell::Cell, gene::NodeID, neuron_presence, pause, should_reset,
-    windowed::shader::Shader,
+    accounted_time, gene::NodeID, neuron_presence, pause, should_reset, windowed::shader::Shader,
 };
 
 #[repr(C)]
