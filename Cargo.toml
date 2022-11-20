@@ -2,7 +2,6 @@
 
 members = [
     "EvolutionSim",
-    "ProcEvolutionSim",
 ]
 
 [profile.release]

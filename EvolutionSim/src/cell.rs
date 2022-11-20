@@ -43,10 +43,12 @@ pub struct OtherData {
 }
 
 pub fn newRandom(genomeSize: usize, stepsPerGen: TimeT) -> (MovementData, NeuronData, OtherData) {
-    let mut genome = Vec::new();
+    let mut genome = Vec::with_capacity(genomeSize);
+
+    let mut rng = thread_rng();
 
     for _ in 0..genomeSize {
-        genome.push(Gene::new_random());
+        genome.push(Gene::newRandom(&mut rng));
     }
 
     let genome = genome.into_boxed_slice();

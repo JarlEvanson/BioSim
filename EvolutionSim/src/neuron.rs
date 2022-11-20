@@ -21,30 +21,30 @@ impl NeuralNet {
             let mut tail_index = 0;
             let mut head_index = 0;
             for neuron_index in 0..neurons.len() {
-                if gene.get_head_node_id() == neurons[neuron_index].variant {
+                if gene.getHeadNodeID() == neurons[neuron_index].variant {
                     head_already_added = true;
                     head_index = neuron_index;
                 }
-                if gene.get_tail_node_id() == neurons[neuron_index].variant {
+                if gene.getTailNodeID() == neurons[neuron_index].variant {
                     tail_already_added = true;
                     tail_index = neuron_index;
                 }
             }
 
-            if gene.get_head_node_id() == gene.get_tail_node_id() {
+            if gene.getHeadNodeID() == gene.getTailNodeID() {
                 tail_already_added = true;
             }
 
             if !head_already_added {
                 neurons.push(Neuron {
-                    variant: gene.get_head_node_id(),
+                    variant: gene.getHeadNodeID(),
                     value: 0.0,
                 });
                 head_index = neurons.len() - 1;
             }
             if !tail_already_added {
                 neurons.push(Neuron {
-                    variant: gene.get_tail_node_id(),
+                    variant: gene.getTailNodeID(),
                     value: 0.0,
                 });
                 tail_index = neurons.len() - 1;
@@ -53,7 +53,7 @@ impl NeuralNet {
             connections.push(Connection {
                 input: head_index,
                 output: tail_index,
-                weight: gene.get_weight(),
+                weight: gene.getWeight(),
             });
         }
 

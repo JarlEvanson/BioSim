@@ -365,7 +365,7 @@ extern "C" fn keyCallback(
 
         let ptr = ptr as *mut Config;
 
-        println!("\n{}\n", unsafe { (*ptr).to_string() });
+        println!("\n{}", unsafe { (*ptr).to_string() });
     }
 }
 

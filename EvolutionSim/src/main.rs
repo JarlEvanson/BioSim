@@ -2,12 +2,9 @@
 #![feature(trace_macros, new_uninit)]
 #![feature(test)]
 
-use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
 use std::slice::{Chunks, ChunksMut};
 use std::{process::exit, rc::Rc};
-
-extern crate ProcEvolutionSim;
 
 extern crate rand;
 
@@ -71,7 +68,7 @@ fn main() {
     let population = Rc::new(DebugRefCell::new(Population::new(&config)));
 
     if config.getIsWindowing() {
-        println!("Press R to reset simulation\nPress SPACE to pause and restart simulation\nPress E to print current neuron frequencies\nPress Escape to close window\nPress S to save current generation's genes");
+        println!("Press R to reset simulation\nPress SPACE to pause and restart simulation\nPress E to print current neuron frequencies\nPress Escape to close window\nPress S to save current generation's genes\nPress C to print config");
 
         let window = Window::createWindow(&config, 512, 512).expect("Window failed to be created");
         unsafe {
@@ -91,7 +88,7 @@ fn main() {
 
         let mut outputted = false;
 
-        let mut threadpool = Pool::new(1); //std::thread::available_parallelism().unwrap().get() as u32);
+        let mut threadpool = Pool::new(std::thread::available_parallelism().unwrap().get() as u32);
 
         while !window.shouldClose() {
             window.poll();
