@@ -1,6 +1,6 @@
 use std::{
     fmt::{Debug, Display, Write},
-    ops::BitXor,
+    ops::{BitAnd, BitOr, BitXor, Rem, Shl, Shr},
 };
 
 use rand::{prelude::ThreadRng, Rng, RngCore};
@@ -21,7 +21,7 @@ impl Gene {
     }
 
     #[inline(always)]
-    pub fn newRandom(rng: &mut ThreadRng) -> Gene {
+    pub fn new_random(rng: &mut ThreadRng) -> Gene {
         Gene {
             gene: rng.next_u32(),
         }
@@ -37,8 +37,16 @@ impl Gene {
         }
     }
 
-    pub fn getHeadNodeID(&self) -> NodeID {
-        self
+    pub fn get_head_node_id(&self) -> NodeID {
+        NodeID::as_head_types((self.gene >> 24) as u8)
+    }
+
+    pub fn get_tail_node_id(&self) -> NodeID {
+        NodeID::as_head_types(((self.gene >> 16) & 0xFF) as u8)
+    }
+
+    pub fn get_weight(&self) -> f32 {
+        (self.gene as i16 as f32) / ((u16::MAX / 8) as f32)
     }
 }
 
@@ -57,9 +65,9 @@ impl Display for Gene {
         write!(
             f,
             "{} {} {}",
-            self.getHeadNodeID(),
-            self.getTailNodeID(),
-            self.getWeight()
+            self.get_head_node_id(),
+            self.get_tail_node_id(),
+            self.get_weight()
         )
     }
 }
@@ -88,7 +96,8 @@ pub const INNER_NODE_COUNT: u32 = 3;
 pub const OUTPUT_NODE_COUNT: u32 = 10;
 pub const TOTAL_NODE_COUNT: u32 = INPUT_NODE_COUNT + INNER_NODE_COUNT + OUTPUT_NODE_COUNT;
 
-enum NodeID {
+#[derive(Clone, Copy, Debug)]
+pub enum NodeID {
     //Input Nodes
     DistX = 0,
     DistY,
@@ -126,65 +135,40 @@ impl PartialEq for NodeID {
 }
 
 impl NodeID {
-    fn getIndex(&self) -> usize {
+    pub fn get_index(&self) -> usize {
         (*self) as usize
     }
 
-    fn fromIndex(index: usize) -> NodeID {
-        if index < TOTAL_NODE_COUNT {
-            unsafe { return std::mem::transmute::<u8, NodeID>(index as u8) }
-        } else {
-            panic!("Invalid index");
-        }
+    pub fn from_index(index: usize) -> NodeID {
+        debug_assert!(index < TOTAL_NODE_COUNT as usize);
+
+        unsafe { return std::mem::transmute::<u8, NodeID>(index as u8) }
     }
 
-    fn fromIndexUnchecked(index: usize) -> NodeID {
+    unsafe fn from_index_unchecked(index: usize) -> NodeID {
         unsafe { std::mem::transmute::<u8, NodeID>(index as u8) }
     }
 
-    fn asInput(value: u8) -> NodeID {
-        match (value & 0b01111111) as u8 {
-            0 => NodeID::DistX,
-            1 => NodeID::DistY,
-            2 => NodeID::Age,
-            3 => NodeID::Oscillator,
-            _ => unreachable!(),
-        }
+    fn as_head_types(value: u8) -> NodeID {
+        unsafe { std::mem::transmute(value) }
     }
 
-    fn asInner(value: u8) -> NodeID {
-        match (value & 0b01111111) as u8 {
-            0 => NodeID::Inner1,
-            1 => NodeID::Inner2,
-            2 => NodeID::Inner3,
-            _ => unreachable!(),
-        }
+    fn as_tail_types(value: u8) -> NodeID {
+        unsafe { std::mem::transmute(value + (INPUT_NODE_COUNT as u8)) }
     }
 
-    fn asOutput(value: u8) -> NodeID {
-        match (value & 0b01111111) as u8 {
-            0 => NodeID::MoveNorth,
-            1 => NodeID::MoveSouth,
-            2 => NodeID::MoveEast,
-            3 => NodeID::MoveWest,
-            4 => NodeID::MoveRandom,
-            5 => NodeID::MoveForward,
-            6 => NodeID::MoveRight,
-            7 => NodeID::MoveLeft,
-            8 => NodeID::MoveReverse,
-            9 => NodeID::KillForward,
-            _ => unreachable!(),
-        }
+    pub fn get_output_id(&self) -> usize {
+        self.get_index() - (INNER_NODE_COUNT as usize + INPUT_NODE_COUNT as usize)
     }
 
-    fn isInner(&self) -> bool {
+    pub fn is_inner(&self) -> bool {
         if *self == NodeID::Inner1 || *self == NodeID::Inner2 || *self == NodeID::Inner3 {
             return true;
         }
         return false;
     }
 
-    fn isInput(&self) -> bool {
+    pub fn is_input(&self) -> bool {
         if *self == NodeID::DistX
             || *self == NodeID::DistY
             || *self == NodeID::Age
@@ -195,7 +179,7 @@ impl NodeID {
         return false;
     }
 
-    fn isOutput(&self) -> bool {
+    pub fn is_output(&self) -> bool {
         if *self == NodeID::MoveNorth
             || *self == NodeID::MoveSouth
             || *self == NodeID::MoveEast

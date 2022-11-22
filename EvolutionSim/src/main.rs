@@ -23,7 +23,7 @@ use population::Population;
 mod cell;
 
 mod gene;
-use gene::NodeID_COUNT;
+use gene::TOTAL_NODE_COUNT;
 
 use crate::windowed::window::wait;
 mod neuron;
@@ -33,7 +33,7 @@ mod bench;
 use DebugCell::DebugRefCell;
 
 //Statistics
-static mut neuron_presence: [u32; NodeID_COUNT] = [0; NodeID_COUNT];
+static mut neuron_presence: [u32; TOTAL_NODE_COUNT as usize] = [0; TOTAL_NODE_COUNT as usize];
 
 //Display
 static mut grid_display_side_length: u32 = 0;

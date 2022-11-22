@@ -48,7 +48,7 @@ pub fn newRandom(genomeSize: usize, stepsPerGen: TimeT) -> (MovementData, Neuron
     let mut rng = thread_rng();
 
     for _ in 0..genomeSize {
-        genome.push(Gene::newRandom(&mut rng));
+        genome.push(Gene::new_random(&mut rng));
     }
 
     let genome = genome.into_boxed_slice();
@@ -170,31 +170,28 @@ pub fn oneStep(
 
     let offset = DIR::get_random().get_move_offset();
 
-    let mut x = outputs[NodeID::get_index(&NodeID::MoveEast) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-        - outputs[NodeID::get_index(&NodeID::MoveWest) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-        + outputs[NodeID::get_index(&NodeID::MoveRandom) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * offset.0
-        + outputs[NodeID::get_index(&NodeID::MoveForward) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
+    let mut x = outputs[NodeID::get_output_id(&NodeID::MoveEast)]
+        - outputs[NodeID::get_output_id(&NodeID::MoveWest)]
+        + outputs[NodeID::get_output_id(&NodeID::MoveRandom)] * offset.0
+        + outputs[NodeID::get_output_id(&NodeID::MoveForward)]
             * cell.1.lastMoveDir.get_move_offset().0
-        + outputs[NodeID::get_index(&NodeID::MoveReverse) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
+        + outputs[NodeID::get_output_id(&NodeID::MoveReverse)]
             * cell.1.lastMoveDir.rotate180().get_move_offset().0
-        + outputs[NodeID::get_index(&NodeID::MoveLeft) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
+        + outputs[NodeID::get_output_id(&NodeID::MoveLeft)]
             * cell.1.lastMoveDir.rotateCCW90().get_move_offset().0
-        + outputs[NodeID::get_index(&NodeID::MoveRight) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
+        + outputs[NodeID::get_output_id(&NodeID::MoveRight)]
             * cell.1.lastMoveDir.rotateCW90().get_move_offset().0;
 
-    let mut y = outputs
-        [NodeID::get_index(&NodeID::MoveNorth) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-        - outputs[NodeID::get_index(&NodeID::MoveSouth) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-        + outputs[NodeID::get_index(&NodeID::MoveRandom) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * offset.1
-        + outputs[NodeID::get_index(&NodeID::MoveForward) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
+    let mut y = outputs[NodeID::get_output_id(&NodeID::MoveNorth)]
+        - outputs[NodeID::get_output_id(&NodeID::MoveSouth)]
+        + outputs[NodeID::get_output_id(&NodeID::MoveRandom)] * offset.1
+        + outputs[NodeID::get_output_id(&NodeID::MoveForward)]
             * cell.1.lastMoveDir.get_move_offset().1
-        + outputs[NodeID::get_index(&NodeID::MoveReverse) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
+        + outputs[NodeID::get_output_id(&NodeID::MoveReverse)]
             * cell.1.lastMoveDir.get_move_offset().1
-        + outputs[NodeID::get_index(&NodeID::MoveLeft) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
+        + outputs[NodeID::get_output_id(&NodeID::MoveLeft)]
             * cell.1.lastMoveDir.rotateCCW90().get_move_offset().1
-        + outputs[NodeID::get_index(&NodeID::MoveRight) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
+        + outputs[NodeID::get_output_id(&NodeID::MoveRight)]
             * cell.1.lastMoveDir.rotateCW90().get_move_offset().1;
 
     x = x.tanh();
@@ -234,10 +231,10 @@ pub fn createColor(genome: &Box<[Gene]>) -> (u8, u8, u8) {
     const maxLumaVal: u32 = 0xb0;
 
     let mut color = {
-        let c: u32 = u32::from(genome.first().unwrap().get_head_type() == NodeType::INPUT)
-            | (u32::from(genome.last().unwrap().get_head_type() == NodeType::INPUT) << 1)
-            | (u32::from(genome.first().unwrap().get_tail_type() == NodeType::INNER) << 2)
-            | (u32::from(genome.last().unwrap().get_tail_type() == NodeType::INNER) << 3)
+        let c: u32 = u32::from(genome.first().unwrap().get_head_node_id().is_input())
+            | (u32::from(genome.last().unwrap().get_head_node_id().is_input()) << 1)
+            | (u32::from(genome.first().unwrap().get_tail_node_id().is_inner()) << 2)
+            | (u32::from(genome.last().unwrap().get_tail_node_id().is_inner()) << 3)
             | (((genome.first().unwrap().get_head_node_id().get_index() & 1) as u32) << 4)
             | (((genome.first().unwrap().get_tail_node_id().get_index() & 1) as u32) << 5)
             | (((genome.last().unwrap().get_head_node_id().get_index() & 1) as u32) << 6)

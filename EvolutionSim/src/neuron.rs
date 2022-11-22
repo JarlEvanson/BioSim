@@ -21,30 +21,30 @@ impl NeuralNet {
             let mut tail_index = 0;
             let mut head_index = 0;
             for neuron_index in 0..neurons.len() {
-                if gene.getHeadNodeID() == neurons[neuron_index].variant {
+                if gene.get_head_node_id() == neurons[neuron_index].variant {
                     head_already_added = true;
                     head_index = neuron_index;
                 }
-                if gene.getTailNodeID() == neurons[neuron_index].variant {
+                if gene.get_tail_node_id() == neurons[neuron_index].variant {
                     tail_already_added = true;
                     tail_index = neuron_index;
                 }
             }
 
-            if gene.getHeadNodeID() == gene.getTailNodeID() {
+            if gene.get_head_node_id() == gene.get_tail_node_id() {
                 tail_already_added = true;
             }
 
             if !head_already_added {
                 neurons.push(Neuron {
-                    variant: gene.getHeadNodeID(),
+                    variant: gene.get_head_node_id(),
                     value: 0.0,
                 });
                 head_index = neurons.len() - 1;
             }
             if !tail_already_added {
                 neurons.push(Neuron {
-                    variant: gene.getTailNodeID(),
+                    variant: gene.get_tail_node_id(),
                     value: 0.0,
                 });
                 tail_index = neurons.len() - 1;
@@ -53,7 +53,7 @@ impl NeuralNet {
             connections.push(Connection {
                 input: head_index,
                 output: tail_index,
-                weight: gene.getWeight(),
+                weight: gene.get_weight(),
             });
         }
 
@@ -207,13 +207,12 @@ impl NeuralNet {
         }
     }
 
-    pub fn get_outputs(&self) -> [f32; OUTPUT_NODE_COUNT] {
+    pub fn get_outputs(&self) -> [f32; OUTPUT_NODE_COUNT as usize] {
         let mut outputs = [0.0; OUTPUT_NODE_COUNT as usize];
 
         for neuron in self.neurons.deref() {
             if neuron.variant.is_output() {
-                outputs[NodeID::get_index(&neuron.variant) - INPUT_NODE_COUNT - INNER_NODE_COUNT] =
-                    neuron.value;
+                outputs[NodeID::get_output_id(&neuron.variant)] = neuron.value;
             }
         }
 

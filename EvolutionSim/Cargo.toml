@@ -9,3 +9,4 @@ glfw = "0.43.0"
 gl = "0.14.0"
 rand = "0.8.5"
 scoped_threadpool = "0.1.*"
+custom_dst = { git = "https://github.com/JarlEvanson/custom_dst.git" }
