@@ -28,7 +28,10 @@ fn assignGrid(b: &mut Bencher) {
         config.getGridHeight(),
     )));
 
-    let population = Rc::new(DebugRefCell::new(Population::new(&config)));
+    let population = Rc::new(DebugRefCell::new(Population::new(
+        &config,
+        &mut grid.borrowMut(),
+    )));
 
     b.iter(|| {
         population.borrowMut().assignRandom(&mut grid.borrowMut());
@@ -45,10 +48,16 @@ fn genRandom(b: &mut Bencher) {
         config.getGridHeight(),
     )));
 
-    let population = Rc::new(DebugRefCell::new(Population::new(&config)));
+    let population = Rc::new(DebugRefCell::new(Population::new(
+        &config,
+        &mut grid.borrowMut(),
+    )));
 
     b.iter(|| {
-        population.borrowMut().genRandom(&config);
+        population
+            .borrowMut()
+            .genRandom(&config, &mut grid.borrowMut());
+        grid.borrowMut().reset();
     });
 }
 
@@ -61,7 +70,10 @@ fn computeMovementsBench(b: &mut Bencher) {
         config.getGridHeight(),
     )));
 
-    let population = Rc::new(DebugRefCell::new(Population::new(&config)));
+    let population = Rc::new(DebugRefCell::new(Population::new(
+        &config,
+        &mut grid.borrowMut(),
+    )));
 
     let mut threadpool = Pool::new(std::thread::available_parallelism().unwrap().get() as u32);
 

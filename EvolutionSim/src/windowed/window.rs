@@ -197,7 +197,7 @@ impl Window {
                     for index in indices {
                         living.push((
                             population.getCellMovementData(index),
-                            population.getCellOtherData(index),
+                            population.getCellMiscData(index),
                         ));
                     }
                     living

@@ -1,9 +1,9 @@
 use std::{
     fmt::{Debug, Display, Write},
-    ops::{BitAnd, BitOr, BitXor, Rem, Shl, Shr},
+    ops::BitXor,
 };
 
-use rand::{prelude::ThreadRng, Rng, RngCore};
+use rand::{prelude::ThreadRng, RngCore};
 
 #[derive(Clone, Copy)]
 pub struct Gene {
@@ -42,7 +42,7 @@ impl Gene {
     }
 
     pub fn get_tail_node_id(&self) -> NodeID {
-        NodeID::as_head_types(((self.gene >> 16) & 0xFF) as u8)
+        NodeID::as_tail_types(((self.gene >> 16) & 0xFF) as u8)
     }
 
     pub fn get_weight(&self) -> f32 {
@@ -75,19 +75,6 @@ impl Display for Gene {
 impl Debug for Gene {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:08x}", self.gene)
-    }
-}
-
-#[derive(Debug)]
-pub enum NodeType {
-    INPUT,
-    INNER,
-    OUTPUT,
-}
-
-impl PartialEq for NodeType {
-    fn eq(&self, other: &Self) -> bool {
-        core::mem::discriminant(self) == core::mem::discriminant(other)
     }
 }
 
@@ -136,7 +123,7 @@ impl PartialEq for NodeID {
 
 impl NodeID {
     pub fn get_index(&self) -> usize {
-        (*self) as usize
+        (*self) as i32 as usize
     }
 
     pub fn from_index(index: usize) -> NodeID {
@@ -145,6 +132,7 @@ impl NodeID {
         unsafe { return std::mem::transmute::<u8, NodeID>(index as u8) }
     }
 
+    #[allow(unused)]
     unsafe fn from_index_unchecked(index: usize) -> NodeID {
         unsafe { std::mem::transmute::<u8, NodeID>(index as u8) }
     }

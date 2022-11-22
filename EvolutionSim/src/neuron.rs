@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 
-use crate::gene::{Gene, NodeID, INNER_NODE_COUNT, INPUT_NODE_COUNT, OUTPUT_NODE_COUNT};
+use crate::gene::{Gene, NodeID, OUTPUT_NODE_COUNT};
 use crate::neuron_presence;
 
 pub struct NeuralNet {
@@ -10,7 +10,7 @@ pub struct NeuralNet {
 }
 
 impl NeuralNet {
-    pub fn new(genome: &Box<[Gene]>) -> NeuralNet {
+    pub fn new(genome: &[Gene]) -> NeuralNet {
         let mut neurons: Vec<Neuron> = Vec::new();
 
         let mut connections = Vec::new();
@@ -141,11 +141,7 @@ impl NeuralNet {
         }
     }
 
-    //Sensor Values
-    //Index 0: X value
-    //Index 1: Y value
-    //Index 2: Age
-    pub fn feed_forward(&mut self, sensor_values: &Vec<f32>) {
+    pub fn prepare_net(&mut self, sensor_values: &[f32]) {
         self.clear();
 
         for neuron in self.neurons.as_mut() {
@@ -157,7 +153,13 @@ impl NeuralNet {
                 _ => {}
             }
         }
+    }
 
+    //Sensor Values
+    //Index 0: X value
+    //Index 1: Y value
+    //Index 2: Age
+    pub fn feed_forward(&mut self) {
         let mut last_index: usize = 0;
 
         for index in last_index..self.connections.len() {
