@@ -8,7 +8,11 @@ use std::{process::exit, rc::Rc};
 
 extern crate rand;
 
+extern crate custom_dst;
+
 extern crate scoped_threadpool;
+use custom_dst::MaybeUninitDstArray;
+use rand::thread_rng;
 use scoped_threadpool::Pool;
 
 mod windowed;
@@ -23,8 +27,10 @@ use population::Population;
 mod cell;
 
 mod gene;
-use gene::NodeID_COUNT;
+use gene::TOTAL_NODE_COUNT;
 
+use crate::cell::HeritableData;
+use crate::gene::Gene;
 use crate::windowed::window::wait;
 mod neuron;
 
@@ -33,7 +39,7 @@ mod bench;
 use DebugCell::DebugRefCell;
 
 //Statistics
-static mut neuron_presence: [u32; NodeID_COUNT] = [0; NodeID_COUNT];
+static mut neuron_presence: [u32; TOTAL_NODE_COUNT as usize] = [0; TOTAL_NODE_COUNT as usize];
 
 //Display
 static mut grid_display_side_length: u32 = 0;
@@ -65,7 +71,29 @@ fn main() {
         config.getGridHeight(),
     )));
 
-    let population = Rc::new(DebugRefCell::new(Population::new(&config)));
+    let population = Rc::new(DebugRefCell::new(Population::new(
+        &config,
+        &mut grid.borrowMut(),
+    )));
+
+    let mut scratch = MaybeUninitDstArray::<HeritableData, Gene>::new(
+        config.getGenomeSize(),
+        config.getPopSize(),
+    );
+
+    let mut scratch = {
+        let popSize = config.getPopSize();
+        let genomeSize = config.getGenomeSize();
+
+        for arr_index in 0..popSize {
+            scratch.write_header(arr_index, HeritableData::default());
+            for footer_index in 0..genomeSize {
+                scratch.write_footer_element(arr_index, footer_index, Gene::new(0));
+            }
+        }
+
+        unsafe { scratch.assume_init() }
+    };
 
     if config.getIsWindowing() {
         println!("Press R to reset simulation\nPress SPACE to pause and restart simulation\nPress E to print current neuron frequencies\nPress Escape to close window\nPress S to save current generation's genes\nPress C to print config");
@@ -77,8 +105,6 @@ fn main() {
             grid_display_side_length = 512;
         }
         window.make_current();
-
-        population.borrowMut().assignRandom(&mut grid.borrowMut());
 
         window.render(&config, &population.borrow());
 
@@ -100,14 +126,12 @@ fn main() {
                     should_reset = false;
                 }
 
-                population.borrowMut().genRandom(&config);
+                population
+                    .borrowMut()
+                    .genRandom(&config, &mut grid.borrowMut());
             }
 
             if unsafe { steps == 0 } && !outputted {
-                grid.borrowMut().reset();
-
-                population.borrowMut().assignRandom(&mut grid.borrowMut());
-
                 window.render(&config, &population.borrow());
 
                 println!("Generation {}:", unsafe { generation });
@@ -166,43 +190,34 @@ fn main() {
                     &population.borrow().getLivingIndices().len() - reproducers.len(),
                 );
 
-                population
-                    .borrowMut()
-                    .reproduceAsexually(&config, reproducers);
+                grid.borrowMut().reset();
 
-                //wait(&window, 2.0);
+                population.borrowMut().reproduceAsexually(
+                    &mut scratch,
+                    &config,
+                    reproducers,
+                    &mut grid.borrowMut(),
+                );
+
+                wait(&window, 2.0);
+
+                window.render(&config, &population.borrow());
 
                 unsafe { steps = 0 };
                 unsafe { generation += 1 };
             }
         }
     } else {
-        population.borrowMut().assignRandom(&mut grid.borrowMut());
-
         let mut threadpool = Pool::new(std::thread::available_parallelism().unwrap().get() as u32);
 
-        loop {
-            if unsafe { should_reset } {
-                unsafe {
-                    steps = 0;
-                    generation = 0;
-                    should_reset = false;
-                }
+        let steps_per_gen = config.getStepsPerGen();
 
-                population.borrowMut().genRandom(&config);
-            }
+        #[allow(unused_labels)]
+        'gen_loop: loop {
+            println!("Generation {}", unsafe { generation });
 
-            if unsafe { steps == 0 } {
-                grid.borrowMut().reset();
-                population.borrowMut().assignRandom(&mut grid.borrowMut());
-
-                println!("Generation {}:", unsafe { generation });
-            }
-
-            {
-                unsafe {
-                    steps += 1;
-                };
+            for _ in 0..steps_per_gen {
+                unsafe { steps += 1 };
 
                 let size = computeMovements(&config, &mut threadpool, &mut population.borrowMut());
                 population
@@ -213,29 +228,30 @@ fn main() {
                 population.borrowMut().resolveDead(&mut grid.borrowMut());
             }
 
-            if unsafe { steps } == config.getStepsPerGen() {
-                if unsafe { generation } % 5 == 0 {}
-
-                let reproducers = determine_reproducers(&config, &mut population.borrowMut());
-                if reproducers.len() == 0 {
-                    println!("Failed to produce viable offspring");
-                    exit(1);
-                }
-
-                println!(
-                    "Dead: {:3}\tReproducing: {:3}\tLiving Non-reproducing: {:3}",
-                    config.getPopSize() - &population.borrow().getLivingIndices().len(),
-                    reproducers.len(),
-                    &population.borrow().getLivingIndices().len() - reproducers.len(),
-                );
-
-                population
-                    .borrowMut()
-                    .reproduceAsexually(&config, reproducers);
-
-                unsafe { steps = 0 };
-                unsafe { generation += 1 };
+            let reproducers = determine_reproducers(&config, &mut population.borrowMut());
+            if reproducers.len() == 0 {
+                println!("Failed to produce viable offspring");
+                exit(1);
             }
+
+            println!(
+                "Dead: {:3}\tReproducing: {:3}\tLiving Non-reproducing: {:3}",
+                config.getPopSize() - &population.borrow().getLivingIndices().len(),
+                reproducers.len(),
+                &population.borrow().getLivingIndices().len() - reproducers.len(),
+            );
+
+            grid.borrowMut().reset();
+
+            population.borrowMut().reproduceAsexually(
+                &mut scratch,
+                &config,
+                reproducers,
+                &mut grid.borrowMut(),
+            );
+
+            unsafe { steps = 0 };
+            unsafe { generation += 1 };
         }
     }
 }
@@ -310,22 +326,44 @@ pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Popula
         for chunk in chunks {
             let resChunk = resChunks.next().unwrap();
             scope.execute(move || {
+                let mut rng = thread_rng();
+
                 for (index, cellIndex) in chunk.into_iter().enumerate() {
                     let movement = unsafe { &mut *pop_ptr.ptr }.getCellMovementData(*cellIndex);
                     let neurons = unsafe { &mut *pop_ptr.ptr }.getCellMutNeuronData(*cellIndex);
+                    let heritable_data =
+                        unsafe { &mut *pop_ptr.ptr }.getCellHeritableData(*cellIndex);
 
-                    let coords =
-                        cell::oneStep((neurons, movement), gridWidth, gridHeight, stepsPerGen);
+                    let coords = cell::one_step(
+                        neurons,
+                        movement,
+                        heritable_data.get_header().get_oscillator(),
+                        gridWidth,
+                        gridHeight,
+                        stepsPerGen,
+                        &mut rng,
+                    );
                     resChunk[index] = (*cellIndex, coords);
                 }
             });
         }
 
+        let mut rng = thread_rng();
+
         for (index, cellIndex) in localChunk.into_iter().enumerate() {
             let movement = unsafe { &mut *pop_ptr.ptr }.getCellMovementData(*cellIndex);
             let neurons = unsafe { &mut *pop_ptr.ptr }.getCellMutNeuronData(*cellIndex);
+            let heritable_data = unsafe { &mut *pop_ptr.ptr }.getCellHeritableData(*cellIndex);
 
-            let coords = cell::oneStep((neurons, movement), gridWidth, gridHeight, stepsPerGen);
+            let coords = cell::one_step(
+                neurons,
+                movement,
+                heritable_data.get_header().get_oscillator(),
+                gridWidth,
+                gridHeight,
+                stepsPerGen,
+                &mut rng,
+            );
             localResults[index] = (*cellIndex, coords);
         }
     });
@@ -390,6 +428,7 @@ mod DebugCell {
         ops::{Deref, DerefMut},
     };
 
+    #[cfg(debug_assertions)]
     #[derive(Clone, Copy, Debug, PartialEq)]
     enum RefType {
         Mutable,
@@ -548,6 +587,7 @@ mod DebugCell {
         }
 
         #[cfg(debug_assertions)]
+        #[allow(unused)]
         fn getRefType(&self) -> RefType {
             unsafe { *self.refType.get() }
         }

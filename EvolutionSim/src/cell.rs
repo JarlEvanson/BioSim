@@ -1,8 +1,9 @@
-use rand::{thread_rng, Rng};
+use custom_dst::{DstData, MaybeUninitDstArray};
+use rand::{rngs::ThreadRng, thread_rng, Rng};
 
 use crate::{
     config::MutR,
-    gene::{Gene, NodeID, NodeType, INNER_NODE_COUNT, INPUT_NODE_COUNT},
+    gene::{Gene, NodeID},
     grid::GridValueT,
     neuron::NeuralNet,
     steps, TimeT,
@@ -11,10 +12,18 @@ use crate::{
 pub struct MovementData {
     pub x: GridValueT,
     pub y: GridValueT,
-    pub lastMoveDir: DIR,
+    pub lastMoveDir: Direction,
 }
 
 impl MovementData {
+    pub fn new(x: GridValueT, y: GridValueT, dir: Direction) -> MovementData {
+        MovementData {
+            x,
+            y,
+            lastMoveDir: dir,
+        }
+    }
+
     pub fn getCoords(&self) -> (GridValueT, GridValueT) {
         (self.x, self.y)
     }
@@ -26,218 +35,253 @@ impl MovementData {
 }
 
 pub struct NeuronData {
-    neuralNet: NeuralNet,
-    oscillatorPeriod: TimeT,
+    neural_net: NeuralNet,
 }
 
 impl NeuronData {
-    pub fn getOscillatorPeriod(&self) -> TimeT {
+    pub fn new(neural_net: NeuralNet) -> NeuronData {
+        NeuronData { neural_net }
+    }
+}
+
+pub struct MiscData {
+    pub color: (u8, u8, u8),
+    pub isAlive: bool,
+}
+
+impl MiscData {
+    pub fn new(genome: &[Gene]) -> MiscData {
+        MiscData {
+            color: createColor(genome),
+            isAlive: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct HeritableData {
+    oscillatorPeriod: TimeT,
+}
+
+impl HeritableData {
+    pub fn get_oscillator(&self) -> usize {
         self.oscillatorPeriod
     }
 }
 
-pub struct OtherData {
-    pub color: (u8, u8, u8),
-    pub isAlive: bool,
-    genome: Box<[Gene]>,
+impl Default for HeritableData {
+    fn default() -> Self {
+        Self {
+            oscillatorPeriod: Default::default(),
+        }
+    }
 }
 
-pub fn newRandom(genomeSize: usize, stepsPerGen: TimeT) -> (MovementData, NeuronData, OtherData) {
-    let mut genome = Vec::with_capacity(genomeSize);
+fn normalize_oscillator(period: TimeT, steps_per_gen: TimeT) -> TimeT {
+    period % steps_per_gen
+}
 
+pub fn gen_random_other(
+    other_data: &mut DstData<HeritableData, Gene>,
+    rng: &mut ThreadRng,
+    steps_per_gen: TimeT,
+) {
+    for gene in other_data.get_mut_footer() {
+        *gene = Gene::new_random(rng);
+    }
+
+    *other_data.get_header_mut() = HeritableData {
+        oscillatorPeriod: normalize_oscillator(rng.gen(), steps_per_gen),
+    }
+}
+
+pub unsafe fn write_random_other_init(
+    array: &mut MaybeUninitDstArray<HeritableData, Gene>,
+    arr_index: usize,
+    rng: &mut ThreadRng,
+    genome_length: usize,
+    steps_per_gen: TimeT,
+) {
+    let mut gene_ptr = array.get_footer_element_ptr_mut(arr_index, 0);
+
+    //SAFETY we know the size of the footer and we know the arr index, so this is safe
+    for _ in 0..genome_length {
+        unsafe {
+            *gene_ptr = Gene::new_random(rng);
+            gene_ptr = gene_ptr.add(1);
+        }
+    }
+
+    drop(gene_ptr);
+
+    array.write_header(
+        arr_index,
+        HeritableData {
+            oscillatorPeriod: normalize_oscillator(rng.gen(), steps_per_gen),
+        },
+    );
+}
+
+#[allow(unused)]
+pub fn sexuallyReproduce(
+    heritable_data_1: &DstData<HeritableData, Gene>,
+    heritable_data_2: &DstData<HeritableData, Gene>,
+    cell_loc: &mut DstData<HeritableData, Gene>,
+    stepsPerGen: TimeT,
+    mutationRate: MutR,
+) {
     let mut rng = thread_rng();
 
-    for _ in 0..genomeSize {
-        genome.push(Gene::newRandom(&mut rng));
-    }
+    for (index, gene) in cell_loc.get_mut_footer().iter_mut().enumerate() {
+        if rng.gen_bool(0.5) {
+            if rng.gen_range(0.0 as f32..100.0) < mutationRate {
+                let bit = rng.gen_range(0..32 as u32);
 
-    let genome = genome.into_boxed_slice();
-
-    new(genome, thread_rng().gen::<TimeT>(), stepsPerGen)
-}
-
-pub fn new(
-    genome: Box<[Gene]>,
-    oscillatorPeriod: TimeT,
-    stepsPerGen: TimeT,
-) -> (MovementData, NeuronData, OtherData) {
-    let movementData = MovementData {
-        x: 0,
-        y: 0,
-        lastMoveDir: DIR::get_random(),
-    };
-
-    let neuronData = NeuronData {
-        oscillatorPeriod: oscillatorPeriod % stepsPerGen,
-        neuralNet: NeuralNet::new(&genome),
-    };
-
-    let otherData = OtherData {
-        color: createColor(&genome),
-        genome,
-        isAlive: true,
-    };
-
-    (movementData, neuronData, otherData)
-}
-
-pub fn sexuallyReproduce(
-    cell1: (&OtherData, &NeuronData),
-    cell2: (&OtherData, &NeuronData),
-    genomeLength: usize,
-    stepsPerGen: TimeT,
-    mutationRate: MutR,
-) -> (MovementData, NeuronData, OtherData) {
-    let mut newGenes = Vec::with_capacity(genomeLength);
-
-    for i in 0..genomeLength {
-        if thread_rng().gen_bool(0.5) {
-            if thread_rng().gen_range(0.0 as f32..100.0) < mutationRate {
-                let bit = thread_rng().gen_range(0..32 as u32);
-                (*newGenes)[i as usize] = (*cell1.0.genome)[i as usize] ^ (1 << (bit & 31));
+                *gene = heritable_data_1.get_footer()[index] ^ (1 << (bit & 31));
             }
         } else {
-            if thread_rng().gen_range(0.0 as f32..100.0) < mutationRate {
-                let bit = thread_rng().gen_range(0..32 as u32);
-                (*newGenes)[i as usize] = (*cell2.0.genome)[i as usize] ^ (1 << (bit & 31));
+            if rng.gen_range(0.0 as f32..100.0) < mutationRate {
+                let bit = rng.gen_range(0..32 as u32);
+                *gene = heritable_data_2.get_footer()[index] ^ (1 << (bit & 31));
             }
         }
     }
 
-    let mut oscillator;
+    let oscillator = &mut cell_loc.get_header_mut().oscillatorPeriod;
 
     if thread_rng().gen_bool(0.5) {
-        oscillator = cell1.1.oscillatorPeriod;
+        *oscillator = heritable_data_1.get_header().oscillatorPeriod;
     } else {
-        oscillator = cell2.1.oscillatorPeriod;
+        *oscillator = heritable_data_2.get_header().oscillatorPeriod;
     }
 
-    if thread_rng().gen_range(0.0 as f32..100.0) < mutationRate {
+    if rng.gen_range(0.0 as f32..100.0) < mutationRate {
         let bit = thread_rng().gen_range(0..32 as u32);
-        oscillator = oscillator ^ (1 << (bit & 31));
+        *oscillator = *oscillator ^ (1 << (bit & 31));
     }
 
-    let newGenes = newGenes.into_boxed_slice();
-
-    new(newGenes, oscillator, stepsPerGen)
+    *oscillator = normalize_oscillator(*oscillator, stepsPerGen);
 }
 
-//Takes OtherData and the oscillatorPeriod
 pub fn asexuallyReproduce(
-    cell: (&OtherData, usize), //usize is oscillatorPeriod
-    genomeLength: usize,
+    heritable_data: &DstData<HeritableData, Gene>,
+    cell_loc: &mut DstData<HeritableData, Gene>,
     stepsPerGen: TimeT,
     mutationRate: MutR,
-) -> (MovementData, NeuronData, OtherData) {
-    let mut newGenes = cell.0.genome.clone();
+) {
+    let mut rng = thread_rng();
 
-    for i in 0..genomeLength {
-        if thread_rng().gen_range(0.0 as f32..100.0) < mutationRate {
-            let bit = thread_rng().gen_range(0..32 as u32);
-            unsafe {
-                *newGenes.as_mut_ptr().add(i as usize) =
-                    *newGenes.as_ptr().add(i as usize) ^ (1 << (bit & 31));
-            }
+    //Bitwise copy of the cell, is currently valid
+    *cell_loc.get_header_mut() = *heritable_data.get_header();
+    cell_loc
+        .get_mut_footer()
+        .copy_from_slice(heritable_data.get_footer());
+
+    for i in cell_loc.get_mut_footer() {
+        if rng.gen_range(0.0 as f32..100.0) < mutationRate {
+            let bit = rng.gen_range(0..32 as u32);
+
+            *i = Gene::new(i.gene ^ (1 << (bit & 31)));
         }
     }
 
-    let mut oscillator = cell.1;
+    let oscillator = &mut cell_loc.get_header_mut().oscillatorPeriod;
 
-    if thread_rng().gen_range(0.0 as f32..100.0) < mutationRate {
+    if rng.gen_range(0.0 as f32..100.0) < mutationRate {
         let bit = thread_rng().gen_range(0..32 as u32);
-        oscillator = oscillator ^ (1 << (bit & 31));
+        *oscillator = *oscillator ^ (1 << (bit & 31));
     }
 
-    new(newGenes, oscillator, stepsPerGen)
+    *oscillator = normalize_oscillator(*oscillator, stepsPerGen);
 }
 
-pub fn oneStep(
-    cell: (&mut NeuronData, &MovementData),
+pub fn one_step(
+    neuron_data: &mut NeuronData,
+    movement_data: &MovementData,
+    oscillator: TimeT,
     gridWidth: GridValueT,
     gridHeight: GridValueT,
     stepsPerGen: TimeT,
-) -> (GridValueT, GridValueT) {
-    unsafe {
-        cell.0.neuralNet.feed_forward(&vec![
-            (2 * cell.1.x) as f32 / (gridWidth as f32) - 1.0,
-            (2 * cell.1.y) as f32 / (gridHeight as f32) - 1.0,
-            steps as f32 / (stepsPerGen as f32),
-            ((((steps as f32 / (cell.0.oscillatorPeriod as f32)) as i32 % 2) * 2) - 1) as f32,
-        ]);
-    }
+    rng: &mut ThreadRng,
+) -> (usize, usize) {
+    let values = [
+        (2 * movement_data.x) as f32 / (gridWidth as f32) - 1.0,
+        (2 * movement_data.y) as f32 / (gridHeight as f32) - 1.0,
+        unsafe { steps } as f32 / (stepsPerGen as f32),
+        ((((((unsafe { steps } as f32) / (oscillator as f32)) as i32) % 2) * 2) - 1) as f32,
+    ];
+    neuron_data.neural_net.prepare_net(&values);
+    neuron_data.neural_net.feed_forward();
 
-    let outputs = cell.0.neuralNet.get_outputs();
+    let outputs = neuron_data.neural_net.get_outputs();
 
-    let offset = DIR::get_random().get_move_offset();
+    let (x_rand, y_rand) = Direction::get_random(rng).get_move_offset();
 
-    let mut x = outputs[NodeID::get_index(&NodeID::MoveEast) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-        - outputs[NodeID::get_index(&NodeID::MoveWest) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-        + outputs[NodeID::get_index(&NodeID::MoveRandom) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * offset.0
-        + outputs[NodeID::get_index(&NodeID::MoveForward) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * cell.1.lastMoveDir.get_move_offset().0
-        + outputs[NodeID::get_index(&NodeID::MoveReverse) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * cell.1.lastMoveDir.rotate180().get_move_offset().0
-        + outputs[NodeID::get_index(&NodeID::MoveLeft) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * cell.1.lastMoveDir.rotateCCW90().get_move_offset().0
-        + outputs[NodeID::get_index(&NodeID::MoveRight) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * cell.1.lastMoveDir.rotateCW90().get_move_offset().0;
+    let dir = movement_data.lastMoveDir;
 
-    let mut y = outputs
-        [NodeID::get_index(&NodeID::MoveNorth) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-        - outputs[NodeID::get_index(&NodeID::MoveSouth) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-        + outputs[NodeID::get_index(&NodeID::MoveRandom) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * offset.1
-        + outputs[NodeID::get_index(&NodeID::MoveForward) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * cell.1.lastMoveDir.get_move_offset().1
-        + outputs[NodeID::get_index(&NodeID::MoveReverse) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * cell.1.lastMoveDir.get_move_offset().1
-        + outputs[NodeID::get_index(&NodeID::MoveLeft) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * cell.1.lastMoveDir.rotateCCW90().get_move_offset().1
-        + outputs[NodeID::get_index(&NodeID::MoveRight) - INPUT_NODE_COUNT - INNER_NODE_COUNT]
-            * cell.1.lastMoveDir.rotateCW90().get_move_offset().1;
+    let mut prob_x = outputs[NodeID::get_output_index(&NodeID::MoveEast)]
+        - outputs[NodeID::get_output_index(&NodeID::MoveWest)]
+        + outputs[NodeID::get_output_index(&NodeID::MoveRandom)] * x_rand
+        + outputs[NodeID::get_output_index(&NodeID::MoveForward)] * dir.get_move_offset().0
+        + outputs[NodeID::get_output_index(&NodeID::MoveReverse)]
+            * dir.rotate180().get_move_offset().0
+        + outputs[NodeID::get_output_index(&NodeID::MoveLeft)]
+            * dir.rotateCCW90().get_move_offset().0
+        + outputs[NodeID::get_output_index(&NodeID::MoveRight)]
+            * dir.rotateCW90().get_move_offset().0;
 
-    x = x.tanh();
-    y = y.tanh();
+    let mut prob_y = outputs[NodeID::get_output_index(&NodeID::MoveNorth)]
+        - outputs[NodeID::get_output_index(&NodeID::MoveSouth)]
+        + outputs[NodeID::get_output_index(&NodeID::MoveRandom)] * y_rand
+        + outputs[NodeID::get_output_index(&NodeID::MoveForward)] * dir.get_move_offset().1
+        + outputs[NodeID::get_output_index(&NodeID::MoveReverse)]
+            * dir.rotate180().get_move_offset().1
+        + outputs[NodeID::get_output_index(&NodeID::MoveLeft)]
+            * dir.rotateCCW90().get_move_offset().1
+        + outputs[NodeID::get_output_index(&NodeID::MoveRight)]
+            * dir.rotateCW90().get_move_offset().1;
 
-    let mut coords = (cell.1.x, cell.1.y);
+    prob_x = prob_x.tanh();
+    prob_y = prob_y.tanh();
 
-    if (thread_rng().gen_range(0..i32::MAX) as f32) / (i32::MAX as f32) < x.abs() {
-        if x > 0.0 {
-            coords.0 = coords.0 + 1;
+    let (mut x, mut y) = (movement_data.x, movement_data.y);
+
+    if (rng.gen_range(0..i32::MAX) as f32) / (i32::MAX as f32) < prob_x.abs() {
+        if prob_x > 0.0 {
+            x += 1;
         } else {
-            coords.0 = coords.0.saturating_sub(1);
+            x = x.saturating_sub(1);
         }
     }
 
-    if coords.0 >= gridWidth {
-        coords.0 = gridWidth - 1;
+    if x >= gridWidth {
+        x = gridWidth - 1;
     }
 
-    if (thread_rng().gen_range(0..i32::MAX) as f32) / (i32::MAX as f32) < y.abs() {
-        if y > 0.0 {
-            coords.1 = coords.1 + 1;
+    if (thread_rng().gen_range(0..i32::MAX) as f32) / (i32::MAX as f32) < prob_y.abs() {
+        if prob_y > 0.0 {
+            y += 1;
         } else {
-            coords.1 = coords.1.saturating_sub(1);
+            y = y.saturating_sub(1);
         }
     }
 
-    if coords.1 >= gridHeight {
-        coords.1 = gridHeight - 1;
+    if y >= gridHeight {
+        y = gridHeight - 1;
     }
 
-    coords
+    (x, y)
 }
 
-pub fn createColor(genome: &Box<[Gene]>) -> (u8, u8, u8) {
+pub fn createColor(genome: &[Gene]) -> (u8, u8, u8) {
     const maxColorVal: u32 = 0xb0;
     const maxLumaVal: u32 = 0xb0;
 
     let mut color = {
-        let c: u32 = u32::from(genome.first().unwrap().get_head_type() == NodeType::INPUT)
-            | (u32::from(genome.last().unwrap().get_head_type() == NodeType::INPUT) << 1)
-            | (u32::from(genome.first().unwrap().get_tail_type() == NodeType::INNER) << 2)
-            | (u32::from(genome.last().unwrap().get_tail_type() == NodeType::INNER) << 3)
+        let c: u32 = u32::from(genome.first().unwrap().get_head_node_id().is_input())
+            | (u32::from(genome.last().unwrap().get_head_node_id().is_input()) << 1)
+            | (u32::from(genome.first().unwrap().get_tail_node_id().is_inner()) << 2)
+            | (u32::from(genome.last().unwrap().get_tail_node_id().is_inner()) << 3)
             | (((genome.first().unwrap().get_head_node_id().get_index() & 1) as u32) << 4)
             | (((genome.first().unwrap().get_tail_node_id().get_index() & 1) as u32) << 5)
             | (((genome.last().unwrap().get_head_node_id().get_index() & 1) as u32) << 6)
@@ -261,8 +305,8 @@ pub fn createColor(genome: &Box<[Gene]>) -> (u8, u8, u8) {
     (color.0 as u8, color.1 as u8, color.2 as u8)
 }
 
-#[derive(Debug)]
-pub enum DIR {
+#[derive(Debug, Clone, Copy)]
+pub enum Direction {
     North,
     NorthEast,
     East,
@@ -273,84 +317,84 @@ pub enum DIR {
     NorthWest,
 }
 
-impl DIR {
+impl Direction {
     pub fn get_move_offset(&self) -> (f32, f32) {
         match *self {
-            DIR::North => (0.0, 1.0),
-            DIR::NorthEast => (1.0, 1.0),
-            DIR::East => (1.0, 0.0),
-            DIR::SouthEast => (1.0, -1.0),
-            DIR::South => (0.0, -1.0),
-            DIR::SouthWest => (-1.0, -1.0),
-            DIR::West => (-1.0, 0.0),
-            DIR::NorthWest => (-1.0, 1.0),
+            Direction::North => (0.0, 1.0),
+            Direction::NorthEast => (1.0, 1.0),
+            Direction::East => (1.0, 0.0),
+            Direction::SouthEast => (1.0, -1.0),
+            Direction::South => (0.0, -1.0),
+            Direction::SouthWest => (-1.0, -1.0),
+            Direction::West => (-1.0, 0.0),
+            Direction::NorthWest => (-1.0, 1.0),
         }
     }
 
-    pub fn get_random() -> DIR {
-        match rand::thread_rng().gen_range(0..8) {
-            0 => DIR::North,
-            1 => DIR::NorthEast,
-            2 => DIR::East,
-            3 => DIR::SouthEast,
-            4 => DIR::South,
-            5 => DIR::SouthWest,
-            6 => DIR::West,
-            7 => DIR::NorthWest,
+    pub fn get_random(rng: &mut ThreadRng) -> Direction {
+        match rng.gen_range(0..8) {
+            0 => Direction::North,
+            1 => Direction::NorthEast,
+            2 => Direction::East,
+            3 => Direction::SouthEast,
+            4 => Direction::South,
+            5 => Direction::SouthWest,
+            6 => Direction::West,
+            7 => Direction::NorthWest,
             _ => unreachable!(),
         }
     }
 
-    pub fn get_dir_from_offset(offset: (isize, isize)) -> DIR {
+    pub fn get_dir_from_offset(offset: (isize, isize)) -> Direction {
         match offset {
-            (0, 1) => DIR::North,
-            (1, 1) => DIR::NorthEast,
-            (1, 0) => DIR::East,
-            (1, -1) => DIR::SouthEast,
-            (0, -1) => DIR::South,
-            (-1, -1) => DIR::SouthWest,
-            (-1, 0) => DIR::West,
-            (-1, 1) => DIR::NorthWest,
+            (0, 1) => Direction::North,
+            (1, 1) => Direction::NorthEast,
+            (1, 0) => Direction::East,
+            (1, -1) => Direction::SouthEast,
+            (0, -1) => Direction::South,
+            (-1, -1) => Direction::SouthWest,
+            (-1, 0) => Direction::West,
+            (-1, 1) => Direction::NorthWest,
             (_, _) => unimplemented!(),
         }
     }
 
-    pub fn rotateCCW90(&self) -> DIR {
+    pub fn rotateCCW90(&self) -> Direction {
         match *self {
-            DIR::North => DIR::West,
-            DIR::NorthEast => DIR::NorthWest,
-            DIR::East => DIR::North,
-            DIR::SouthEast => DIR::NorthEast,
-            DIR::South => DIR::East,
-            DIR::SouthWest => DIR::SouthEast,
-            DIR::West => DIR::South,
-            DIR::NorthWest => DIR::SouthWest,
+            Direction::North => Direction::West,
+            Direction::NorthEast => Direction::NorthWest,
+            Direction::East => Direction::North,
+            Direction::SouthEast => Direction::NorthEast,
+            Direction::South => Direction::East,
+            Direction::SouthWest => Direction::SouthEast,
+            Direction::West => Direction::South,
+            Direction::NorthWest => Direction::SouthWest,
         }
     }
 
-    pub fn rotateCW90(&self) -> DIR {
+    pub fn rotateCW90(&self) -> Direction {
         match *self {
-            DIR::West => DIR::North,
-            DIR::NorthWest => DIR::NorthEast,
-            DIR::North => DIR::East,
-            DIR::NorthEast => DIR::SouthEast,
-            DIR::East => DIR::South,
-            DIR::SouthEast => DIR::SouthWest,
-            DIR::South => DIR::West,
-            DIR::SouthWest => DIR::NorthWest,
+            Direction::West => Direction::North,
+            Direction::NorthWest => Direction::NorthEast,
+            Direction::North => Direction::East,
+            Direction::NorthEast => Direction::SouthEast,
+            Direction::East => Direction::South,
+            Direction::SouthEast => Direction::SouthWest,
+            Direction::South => Direction::West,
+            Direction::SouthWest => Direction::NorthWest,
         }
     }
 
-    pub fn rotate180(&self) -> DIR {
+    pub fn rotate180(&self) -> Direction {
         match *self {
-            DIR::North => DIR::South,
-            DIR::NorthEast => DIR::SouthWest,
-            DIR::East => DIR::West,
-            DIR::SouthEast => DIR::NorthWest,
-            DIR::South => DIR::North,
-            DIR::SouthWest => DIR::NorthEast,
-            DIR::West => DIR::East,
-            DIR::NorthWest => DIR::SouthEast,
+            Direction::North => Direction::South,
+            Direction::NorthEast => Direction::SouthWest,
+            Direction::East => Direction::West,
+            Direction::SouthEast => Direction::NorthWest,
+            Direction::South => Direction::North,
+            Direction::SouthWest => Direction::NorthEast,
+            Direction::West => Direction::East,
+            Direction::NorthWest => Direction::SouthEast,
         }
     }
 }
