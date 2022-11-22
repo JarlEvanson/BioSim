@@ -1,9 +1,11 @@
 use std::{
     fmt::{Debug, Display, Write},
-    ops::BitXor,
+    ops::{Add, BitXor, Mul},
 };
 
 use rand::{prelude::ThreadRng, RngCore};
+
+use crate::neuron::NeuralNet;
 
 #[derive(Clone, Copy)]
 pub struct Gene {
@@ -30,8 +32,8 @@ impl Gene {
 
     fn normalize(self) -> Gene {
         let weight = self.gene & 0xFFFF;
-        let tail = ((self.gene >> 16) & 0xFF) % (INNER_NODE_COUNT + OUTPUT_NODE_COUNT);
-        let head = ((self.gene >> 24) & 0xFF) % (INPUT_NODE_COUNT + INNER_NODE_COUNT);
+        let tail = ((self.gene >> 16) & 0xFF) % (INNER_NODE_COUNT + OUTPUT_NODE_COUNT) as u32;
+        let head = ((self.gene >> 24) & 0xFF) % (INPUT_NODE_COUNT + INNER_NODE_COUNT) as u32;
         Gene {
             gene: (head << 24) | (tail << 16) | weight,
         }
@@ -47,6 +49,10 @@ impl Gene {
 
     pub fn get_weight(&self) -> f32 {
         (self.gene as i16 as f32) / ((u16::MAX / 8) as f32)
+    }
+
+    pub fn get_connection_index(&self) -> usize {
+        NeuralNet::get_connection_index(self.get_head_node_id(), self.get_tail_node_id())
     }
 }
 
@@ -78,12 +84,12 @@ impl Debug for Gene {
     }
 }
 
-pub const INPUT_NODE_COUNT: u32 = 4;
-pub const INNER_NODE_COUNT: u32 = 3;
-pub const OUTPUT_NODE_COUNT: u32 = 10;
-pub const TOTAL_NODE_COUNT: u32 = INPUT_NODE_COUNT + INNER_NODE_COUNT + OUTPUT_NODE_COUNT;
+pub const INPUT_NODE_COUNT: usize = 4;
+pub const INNER_NODE_COUNT: usize = 3;
+pub const OUTPUT_NODE_COUNT: usize = 10;
+pub const TOTAL_NODE_COUNT: usize = INPUT_NODE_COUNT + INNER_NODE_COUNT + OUTPUT_NODE_COUNT;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum NodeID {
     //Input Nodes
     DistX = 0,
@@ -105,6 +111,23 @@ pub enum NodeID {
     MoveLeft,
     MoveReverse,
     KillForward,
+    End,
+}
+
+impl Add<usize> for NodeID {
+    type Output = usize;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        self.get_index() + rhs
+    }
+}
+
+impl Mul<usize> for NodeID {
+    type Output = usize;
+
+    fn mul(self, rhs: usize) -> Self::Output {
+        self.get_index() * rhs
+    }
 }
 
 impl Display for NodeID {
@@ -115,19 +138,45 @@ impl Display for NodeID {
     }
 }
 
-impl PartialEq for NodeID {
-    fn eq(&self, other: &Self) -> bool {
-        core::mem::discriminant(self) == core::mem::discriminant(other)
-    }
-}
+use self::NodeID::*;
 
 impl NodeID {
-    pub fn get_index(&self) -> usize {
+    const fn to_int(self) -> usize {
+        match self {
+            DistX => 0,
+            DistY => 1,
+            Age => 2,
+            Oscillator => 3,
+            Inner1 => 4,
+            Inner2 => 5,
+            Inner3 => 6,
+            MoveNorth => 7,
+            MoveEast => 8,
+            MoveSouth => 9,
+            MoveWest => 10,
+            MoveRandom => 11,
+            MoveForward => 12,
+            MoveRight => 13,
+            MoveLeft => 14,
+            MoveReverse => 15,
+            KillForward => 16,
+            End => unimplemented!(),
+        }
+    }
+
+    pub const fn get_max_connections() -> usize {
+        INPUT_NODE_COUNT * INNER_NODE_COUNT
+            + INPUT_NODE_COUNT * OUTPUT_NODE_COUNT
+            + INNER_NODE_COUNT * INNER_NODE_COUNT
+            + INNER_NODE_COUNT * OUTPUT_NODE_COUNT
+    }
+
+    pub const fn get_index(&self) -> usize {
         (*self) as i32 as usize
     }
 
     pub fn from_index(index: usize) -> NodeID {
-        debug_assert!(index < TOTAL_NODE_COUNT as usize);
+        debug_assert!(index < TOTAL_NODE_COUNT);
 
         unsafe { return std::mem::transmute::<u8, NodeID>(index as u8) }
     }
@@ -145,42 +194,75 @@ impl NodeID {
         unsafe { std::mem::transmute(value + (INPUT_NODE_COUNT as u8)) }
     }
 
-    pub fn get_output_id(&self) -> usize {
-        self.get_index() - (INNER_NODE_COUNT as usize + INPUT_NODE_COUNT as usize)
+    pub const fn get_output_index(&self) -> usize {
+        self.get_index() - (INNER_NODE_COUNT + INPUT_NODE_COUNT)
     }
 
-    pub fn is_inner(&self) -> bool {
-        if *self == NodeID::Inner1 || *self == NodeID::Inner2 || *self == NodeID::Inner3 {
+    pub const fn get_input_index(&self) -> usize {
+        self.get_index()
+    }
+
+    pub const fn get_inner_index(&self) -> usize {
+        self.get_index() - INPUT_NODE_COUNT
+    }
+
+    pub fn as_input(value: usize) -> NodeID {
+        NodeID::from_index(value)
+    }
+
+    pub fn as_inner(value: usize) -> NodeID {
+        NodeID::from_index(value + INPUT_NODE_COUNT)
+    }
+
+    pub fn as_output(value: usize) -> NodeID {
+        NodeID::from_index(value + INPUT_NODE_COUNT + INNER_NODE_COUNT)
+    }
+
+    pub const fn is_input(&self) -> bool {
+        if self.to_int() < NodeID::Inner1.to_int() {
             return true;
         }
         return false;
     }
 
-    pub fn is_input(&self) -> bool {
-        if *self == NodeID::DistX
-            || *self == NodeID::DistY
-            || *self == NodeID::Age
-            || *self == NodeID::Oscillator
+    pub const fn is_inner(&self) -> bool {
+        if self.to_int() > NodeID::Oscillator.to_int() && self.to_int() < NodeID::MoveNorth.to_int()
         {
             return true;
         }
         return false;
     }
 
-    pub fn is_output(&self) -> bool {
-        if *self == NodeID::MoveNorth
-            || *self == NodeID::MoveSouth
-            || *self == NodeID::MoveEast
-            || *self == NodeID::MoveWest
-            || *self == NodeID::MoveRandom
-            || *self == NodeID::MoveForward
-            || *self == NodeID::MoveRight
-            || *self == NodeID::MoveLeft
-            || *self == NodeID::MoveReverse
-            || *self == NodeID::KillForward
-        {
+    pub const fn is_output(&self) -> bool {
+        if self.to_int() < NodeID::End.to_int() && self.to_int() > NodeID::Inner3.to_int() {
             return true;
         }
         return false;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::NodeID::*;
+
+    #[test]
+    fn compare_const_and_runtime() {
+        assert!(DistX.to_int() == DistX.get_index());
+        assert!(DistY.to_int() == DistY.get_index());
+        assert!(Age.to_int() == Age.get_index());
+        assert!(Oscillator.to_int() == Oscillator.get_index());
+        assert!(Inner1.to_int() == Inner1.get_index());
+        assert!(Inner2.to_int() == Inner2.get_index());
+        assert!(Inner3.to_int() == Inner3.get_index());
+        assert!(MoveNorth.to_int() == MoveNorth.get_index());
+        assert!(MoveEast.to_int() == MoveEast.get_index());
+        assert!(MoveSouth.to_int() == MoveSouth.get_index());
+        assert!(MoveWest.to_int() == MoveWest.get_index());
+        assert!(MoveRandom.to_int() == MoveRandom.get_index());
+        assert!(MoveForward.to_int() == MoveForward.get_index());
+        assert!(MoveRight.to_int() == MoveRight.get_index());
+        assert!(MoveLeft.to_int() == MoveLeft.get_index());
+        assert!(MoveReverse.to_int() == MoveReverse.get_index());
+        assert!(KillForward.to_int() == KillForward.get_index());
     }
 }

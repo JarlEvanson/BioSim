@@ -219,23 +219,27 @@ pub fn one_step(
 
     let dir = movement_data.lastMoveDir;
 
-    let mut prob_x = outputs[NodeID::get_output_id(&NodeID::MoveEast)]
-        - outputs[NodeID::get_output_id(&NodeID::MoveWest)]
-        + outputs[NodeID::get_output_id(&NodeID::MoveRandom)] * x_rand
-        + outputs[NodeID::get_output_id(&NodeID::MoveForward)] * dir.get_move_offset().0
-        + outputs[NodeID::get_output_id(&NodeID::MoveReverse)]
+    let mut prob_x = outputs[NodeID::get_output_index(&NodeID::MoveEast)]
+        - outputs[NodeID::get_output_index(&NodeID::MoveWest)]
+        + outputs[NodeID::get_output_index(&NodeID::MoveRandom)] * x_rand
+        + outputs[NodeID::get_output_index(&NodeID::MoveForward)] * dir.get_move_offset().0
+        + outputs[NodeID::get_output_index(&NodeID::MoveReverse)]
             * dir.rotate180().get_move_offset().0
-        + outputs[NodeID::get_output_id(&NodeID::MoveLeft)] * dir.rotateCCW90().get_move_offset().0
-        + outputs[NodeID::get_output_id(&NodeID::MoveRight)] * dir.rotateCW90().get_move_offset().0;
+        + outputs[NodeID::get_output_index(&NodeID::MoveLeft)]
+            * dir.rotateCCW90().get_move_offset().0
+        + outputs[NodeID::get_output_index(&NodeID::MoveRight)]
+            * dir.rotateCW90().get_move_offset().0;
 
-    let mut prob_y = outputs[NodeID::get_output_id(&NodeID::MoveNorth)]
-        - outputs[NodeID::get_output_id(&NodeID::MoveSouth)]
-        + outputs[NodeID::get_output_id(&NodeID::MoveRandom)] * y_rand
-        + outputs[NodeID::get_output_id(&NodeID::MoveForward)] * dir.get_move_offset().1
-        + outputs[NodeID::get_output_id(&NodeID::MoveReverse)]
+    let mut prob_y = outputs[NodeID::get_output_index(&NodeID::MoveNorth)]
+        - outputs[NodeID::get_output_index(&NodeID::MoveSouth)]
+        + outputs[NodeID::get_output_index(&NodeID::MoveRandom)] * y_rand
+        + outputs[NodeID::get_output_index(&NodeID::MoveForward)] * dir.get_move_offset().1
+        + outputs[NodeID::get_output_index(&NodeID::MoveReverse)]
             * dir.rotate180().get_move_offset().1
-        + outputs[NodeID::get_output_id(&NodeID::MoveLeft)] * dir.rotateCCW90().get_move_offset().1
-        + outputs[NodeID::get_output_id(&NodeID::MoveRight)] * dir.rotateCW90().get_move_offset().1;
+        + outputs[NodeID::get_output_index(&NodeID::MoveLeft)]
+            * dir.rotateCCW90().get_move_offset().1
+        + outputs[NodeID::get_output_index(&NodeID::MoveRight)]
+            * dir.rotateCW90().get_move_offset().1;
 
     prob_x = prob_x.tanh();
     prob_y = prob_y.tanh();
