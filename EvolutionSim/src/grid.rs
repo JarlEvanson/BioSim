@@ -10,7 +10,7 @@ pub struct Grid {
 
 impl Grid {
     pub fn new(width: GridValueT, height: GridValueT) -> Grid {
-        let grid = vec![None; (width * height) as usize];
+        let grid = vec![None; width * height];
         Grid {
             width,
             height,
@@ -19,11 +19,11 @@ impl Grid {
     }
 
     pub fn get_occupant(&self, x: GridValueT, y: GridValueT) -> Option<usize> {
-        return self.grid[x + y * self.width];
+        self.grid[x + y * self.width]
     }
 
     pub fn set_occupant(&mut self, x: GridValueT, y: GridValueT, cell: Option<usize>) {
-        self.grid[(x + y * self.width) as usize] = cell;
+        self.grid[x + y * self.width] = cell;
     }
 
     pub fn get_in_radius(&self, coords: (GridValueT, GridValueT), radius: f32) -> Vec<usize> {
@@ -44,8 +44,8 @@ impl Grid {
             let mut cx = left;
             while cx <= right {
                 let occupant = self.grid[cx + cy * self.width];
-                if occupant != None {
-                    in_radius.push(occupant.unwrap());
+                if let Some(cell_index) = occupant {
+                    in_radius.push(cell_index);
                 }
                 cx += 1;
             }
@@ -70,7 +70,7 @@ impl Grid {
             x = rng.gen_range(0..self.width);
             y = rng.gen_range(0..self.height);
 
-            if self.get_occupant(x, y) == None {
+            if self.get_occupant(x, y).is_none() {
                 break;
             }
         }

@@ -105,18 +105,16 @@ impl NeuralNet {
                     + head.get_input_index() * INNER_NODE_COUNT
                     + (INPUT_NODE_COUNT * INNER_NODE_COUNT)
             }
+        } else if tail.is_inner() {
+            tail.get_inner_index()
+                + head.get_inner_index() * INNER_NODE_COUNT
+                + (INPUT_NODE_COUNT * INNER_NODE_COUNT + INPUT_NODE_COUNT * OUTPUT_NODE_COUNT)
         } else {
-            if tail.is_inner() {
-                tail.get_inner_index()
-                    + head.get_inner_index() * INNER_NODE_COUNT
-                    + (INPUT_NODE_COUNT * INNER_NODE_COUNT + INPUT_NODE_COUNT * OUTPUT_NODE_COUNT)
-            } else {
-                tail.get_output_index()
-                    + head.get_inner_index() * OUTPUT_NODE_COUNT
-                    + (INPUT_NODE_COUNT * INNER_NODE_COUNT
-                        + INPUT_NODE_COUNT * OUTPUT_NODE_COUNT
-                        + INNER_NODE_COUNT * INNER_NODE_COUNT)
-            }
+            tail.get_output_index()
+                + head.get_inner_index() * OUTPUT_NODE_COUNT
+                + (INPUT_NODE_COUNT * INNER_NODE_COUNT
+                    + INPUT_NODE_COUNT * OUTPUT_NODE_COUNT
+                    + INNER_NODE_COUNT * INNER_NODE_COUNT)
         }
     }
 }
@@ -141,15 +139,16 @@ struct Connection {
 
 impl Debug for NeuralNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "\n\tNeurons: [\n")?;
+        writeln!(f, "Neurons: [")?;
         for neuron in 0..TOTAL_NODE_COUNT {
-            write!(
+            writeln!(
                 f,
-                "\t  {:10}: {}\n",
+                "\t  {:10}: {}",
                 NodeID::from_index(neuron),
                 self.neurons[neuron].value
             )?;
         }
+        writeln!(f, "]")?;
         Ok(())
     }
 }

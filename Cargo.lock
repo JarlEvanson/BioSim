@@ -49,7 +49,7 @@ checksum = "b365fabc795046672053e29c954733ec3b05e4be654ab130fe8f1f94d7051f35"
 [[package]]
 name = "custom_dst"
 version = "0.1.0"
-source = "git+https://github.com/JarlEvanson/custom_dst.git#faab78b9e2d427a92d7a381f39475736df13492a"
+source = "git+https://github.com/JarlEvanson/custom_dst.git#e42f149b2ff328f3bf39e7b27d662e442e827cbe"
 
 [[package]]
 name = "getrandom"

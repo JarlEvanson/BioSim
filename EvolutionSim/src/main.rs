@@ -2,7 +2,6 @@
 #![feature(trace_macros, new_uninit)]
 #![feature(test)]
 
-use std::ops::{Deref, DerefMut};
 use std::slice::{Chunks, ChunksMut};
 use std::{process::exit, rc::Rc};
 
@@ -11,6 +10,7 @@ extern crate rand;
 extern crate custom_dst;
 
 extern crate scoped_threadpool;
+use cell::NeuronData;
 use custom_dst::MaybeUninitDstArray;
 use rand::thread_rng;
 use scoped_threadpool::Pool;
@@ -32,6 +32,7 @@ use gene::TOTAL_NODE_COUNT;
 use crate::cell::HeritableData;
 use crate::gene::Gene;
 use crate::windowed::window::wait;
+use crate::windowed::WindowingStatus;
 mod neuron;
 
 mod bench;
@@ -39,19 +40,7 @@ mod bench;
 use DebugCell::DebugRefCell;
 
 //Statistics
-static mut neuron_presence: [u32; TOTAL_NODE_COUNT as usize] = [0; TOTAL_NODE_COUNT as usize];
-
-//Display
-static mut grid_display_side_length: u32 = 0;
-static mut framebuffer_width: u32 = 0;
-static mut framebuffer_height: u32 = 0;
-
-//Changes during runtime
-static mut accounted_time: f64 = 0.0;
-static mut generation: TimeT = 0;
-static mut steps: TimeT = 0;
-static mut should_reset: bool = false;
-static mut pause: bool = false;
+static mut neuron_presence: [u32; TOTAL_NODE_COUNT] = [0; TOTAL_NODE_COUNT];
 
 mod config;
 use config::Config as ConfigBase;
@@ -67,8 +56,8 @@ fn main() {
     println!("{}", config);
 
     let grid = Rc::new(DebugRefCell::new(Grid::new(
-        config.getGridWidth(),
-        config.getGridHeight(),
+        config.get_grid_width(),
+        config.get_grid_height(),
     )));
 
     let population = Rc::new(DebugRefCell::new(Population::new(
@@ -76,54 +65,46 @@ fn main() {
         &mut grid.borrowMut(),
     )));
 
-    let mut scratch = MaybeUninitDstArray::<HeritableData, Gene>::new(
-        config.getGenomeSize(),
-        config.getPopSize(),
+    let scratch = MaybeUninitDstArray::<HeritableData, Gene>::new(
+        config.get_genome_size(),
+        config.get_pop_size(),
     );
 
-    let mut scratch = {
-        let popSize = config.getPopSize();
-        let genomeSize = config.getGenomeSize();
+    let mut threadpool = Pool::new(std::thread::available_parallelism().unwrap().get() as u32);
 
-        for arr_index in 0..popSize {
-            scratch.write_header(arr_index, HeritableData::default());
-            for footer_index in 0..genomeSize {
-                scratch.write_footer_element(arr_index, footer_index, Gene::new(0));
-            }
-        }
+    //Safety: this will be written to before it is ever read from
+    let mut scratch = { unsafe { scratch.assume_init() } };
 
-        unsafe { scratch.assume_init() }
-    };
+    let mut generation = 0;
 
-    if config.getIsWindowing() {
+    if config.get_is_windowing() {
         println!("Press R to reset simulation\nPress SPACE to pause and restart simulation\nPress E to print current neuron frequencies\nPress Escape to close window\nPress S to save current generation's genes\nPress C to print config");
 
-        let window = Window::createWindow(&config, 512, 512).expect("Window failed to be created");
-        unsafe {
-            framebuffer_width = 512;
-            framebuffer_height = 512;
-            grid_display_side_length = 512;
-        }
+        let windowing_status = Rc::new(DebugRefCell::new(WindowingStatus {
+            is_paused: false,
+            should_reset: false,
+        }));
+
+        let window = Window::createWindow(&config, &windowing_status, 512, 512)
+            .expect("Window failed to be created");
         window.make_current();
 
         window.render(&config, &population.borrow());
 
-        unsafe {
-            accounted_time = glfw::ffi::glfwGetTime();
-        }
+        let mut accounted_time = unsafe { glfw::ffi::glfwGetTime() };
 
         let mut outputted = false;
 
-        let mut threadpool = Pool::new(std::thread::available_parallelism().unwrap().get() as u32);
+        let mut step = 0;
 
         while !window.shouldClose() {
             window.poll();
-            if unsafe { should_reset } {
+            if windowing_status.borrow().should_reset {
+                step = 0;
+                generation = 0;
                 unsafe {
                     accounted_time = glfw::ffi::glfwGetTime();
-                    steps = 0;
-                    generation = 0;
-                    should_reset = false;
+                    windowing_status.borrowMut().should_reset = false;
                 }
 
                 population
@@ -131,34 +112,38 @@ fn main() {
                     .genRandom(&config, &mut grid.borrowMut());
             }
 
-            if unsafe { steps == 0 } && !outputted {
+            if step == 0 && !outputted {
                 window.render(&config, &population.borrow());
 
-                println!("Generation {}:", unsafe { generation });
+                println!("Generation {}:", generation);
 
                 outputted = true;
             }
 
-            if unsafe { glfw::ffi::glfwGetTime() - accounted_time > 0.016 && !pause } {
+            if unsafe {
+                glfw::ffi::glfwGetTime() - accounted_time > 0.016
+                    && !windowing_status.borrow().is_paused
+            } {
                 outputted = false;
-                unsafe {
-                    accounted_time += 0.016;
-                    steps += 1;
-                };
 
-                let size = computeMovements(&config, &mut threadpool, &mut population.borrowMut());
+                accounted_time += 0.016;
+
+                step += 1;
+
+                let size =
+                    computeMovements(&config, &mut threadpool, &mut population.borrowMut(), step);
                 population
                     .borrowMut()
                     .resolveMoveQueue(size, &mut grid.borrowMut());
 
-                determine_deaths(&config, &mut population.borrowMut());
+                determine_deaths(&config, step, &mut population.borrowMut());
                 population.borrowMut().resolveDead(&mut grid.borrowMut());
 
-                if population.borrow().getLivingIndices().len() == 0 {
+                if population.borrow().getLivingIndices().is_empty() {
                     println!("Everyone Died");
                     loop {
                         window.poll();
-                        if window.shouldClose() || unsafe { should_reset } {
+                        if window.shouldClose() || windowing_status.borrow().should_reset {
                             unsafe { accounted_time = glfw::ffi::glfwGetTime() };
                             break;
                         }
@@ -169,13 +154,13 @@ fn main() {
                 window.render(&config, &population.borrow());
             }
 
-            if unsafe { steps } == config.getStepsPerGen() {
-                let reproducers = determine_reproducers(&config, &mut population.borrowMut());
-                if reproducers.len() == 0 {
+            if step == config.get_steps_per_gen() {
+                let reproducers = determine_reproducers(&config, &population.borrowMut());
+                if reproducers.is_empty() {
                     println!("Failed to produce viable offspring");
                     loop {
                         window.poll();
-                        if window.shouldClose() || unsafe { should_reset } {
+                        if window.shouldClose() || windowing_status.borrow().should_reset {
                             unsafe { accounted_time = glfw::ffi::glfwGetTime() };
                             break;
                         }
@@ -185,9 +170,9 @@ fn main() {
 
                 println!(
                     "Dead: {:3}\tReproducing: {:3}\tLiving Non-reproducing: {:3}",
-                    config.getPopSize() - &population.borrow().getLivingIndices().len(),
+                    config.get_pop_size() - population.borrow().getLivingIndices().len(),
                     reproducers.len(),
-                    &population.borrow().getLivingIndices().len() - reproducers.len(),
+                    population.borrow().getLivingIndices().len() - reproducers.len(),
                 );
 
                 grid.borrowMut().reset();
@@ -199,46 +184,48 @@ fn main() {
                     &mut grid.borrowMut(),
                 );
 
-                wait(&window, 2.0);
+                wait(&window, &windowing_status, &mut accounted_time, 1.0);
 
                 window.render(&config, &population.borrow());
 
-                unsafe { steps = 0 };
-                unsafe { generation += 1 };
+                step = 0;
+                generation += 1;
             }
         }
     } else {
-        let mut threadpool = Pool::new(std::thread::available_parallelism().unwrap().get() as u32);
-
-        let steps_per_gen = config.getStepsPerGen();
+        let steps_per_gen = config.get_steps_per_gen();
 
         #[allow(unused_labels)]
         'gen_loop: loop {
-            println!("Generation {}", unsafe { generation });
+            println!("Generation {}", generation);
 
-            for _ in 0..steps_per_gen {
-                unsafe { steps += 1 };
-
-                let size = computeMovements(&config, &mut threadpool, &mut population.borrowMut());
+            for step in 0..steps_per_gen {
+                let size =
+                    computeMovements(&config, &mut threadpool, &mut population.borrowMut(), step);
                 population
                     .borrowMut()
                     .resolveMoveQueue(size, &mut grid.borrowMut());
 
-                determine_deaths(&config, &mut population.borrowMut());
+                determine_deaths(&config, step, &mut population.borrowMut());
                 population.borrowMut().resolveDead(&mut grid.borrowMut());
+
+                if population.borrow().getLivingIndices().is_empty() {
+                    println!("Everyone Died");
+                    return;
+                }
             }
 
-            let reproducers = determine_reproducers(&config, &mut population.borrowMut());
-            if reproducers.len() == 0 {
+            let reproducers = determine_reproducers(&config, &population.borrowMut());
+            if reproducers.is_empty() {
                 println!("Failed to produce viable offspring");
                 exit(1);
             }
 
             println!(
                 "Dead: {:3}\tReproducing: {:3}\tLiving Non-reproducing: {:3}",
-                config.getPopSize() - &population.borrow().getLivingIndices().len(),
+                config.get_pop_size() - population.borrow().getLivingIndices().len(),
                 reproducers.len(),
-                &population.borrow().getLivingIndices().len() - reproducers.len(),
+                population.borrow().getLivingIndices().len() - reproducers.len(),
             );
 
             grid.borrowMut().reset();
@@ -249,53 +236,19 @@ fn main() {
                 reproducers,
                 &mut grid.borrowMut(),
             );
-
-            unsafe { steps = 0 };
-            unsafe { generation += 1 };
+            generation += 1;
         }
     }
 }
 
-pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Population) -> usize {
+pub fn computeMovements(
+    config: &Config,
+    threadpool: &mut Pool,
+    pop: &mut Population,
+    step: TimeT,
+) -> usize {
     let living = pop.getLivingIndices();
-
-    struct Cheat<T> {
-        ptr: *mut T,
-    }
-
-    unsafe impl Send for Cheat<Population> {}
-
-    impl Clone for Cheat<Population> {
-        fn clone(&self) -> Self {
-            Self {
-                ptr: self.ptr.clone(),
-            }
-        }
-    }
-
-    impl Copy for Cheat<Population> {}
-
-    impl Deref for Cheat<Population> {
-        type Target = Population;
-
-        fn deref(&self) -> &Self::Target {
-            unsafe { &*self.ptr }
-        }
-    }
-
-    impl DerefMut for Cheat<Population> {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            unsafe { &mut *self.ptr }
-        }
-    }
-
-    let pop_ptr: Cheat<Population> = Cheat {
-        ptr: unsafe { std::mem::transmute(pop) },
-    };
-
-    let mut x = pop_ptr.clone();
-
-    let results = x.getMutMoveQueue();
+    let len = living.len();
 
     let parts = {
         let threads = threadpool.thread_count();
@@ -311,33 +264,73 @@ pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Popula
         }
     };
 
-    let mut chunks: Chunks<usize> = living.as_slice().chunks(parts);
+    let (movement, neuron, heritable, _, results) = pop.get_data_mut();
 
+    //General read-only data
+    let (movement, heritable) = { (&*movement, &heritable.as_shared_slice()) };
+
+    let mut neuron = Some(neuron);
+
+    //Thread IO is chunked for lock-free reading and writing
+    let mut living: Chunks<usize> = living.as_slice().chunks(parts);
     let mut resChunks: ChunksMut<(usize, (GridValueT, GridValueT))> = results.chunks_mut(parts);
 
-    let gridWidth = config.getGridWidth();
-    let gridHeight = config.getGridHeight();
-    let stepsPerGen = config.getStepsPerGen();
+    let gridWidth = config.get_grid_width();
+    let gridHeight = config.get_grid_height();
+    let stepsPerGen = config.get_steps_per_gen();
 
     threadpool.scoped(|scope| {
-        let localChunk = chunks.next().unwrap();
+        //Chunked IO for main thread
+        let local_living = living.next().unwrap();
         let localResults = resChunks.next().unwrap();
 
-        for chunk in chunks {
+        let mut last_included_cell = local_living.last().unwrap();
+        let mut start_index;
+
+        //# Safety
+        //
+        // neuron is declared as a some above, so it must be a some
+        let local_neuron = unsafe {
+            let (first, last) = split_or_get(neuron.unwrap_unchecked(), last_included_cell + 1);
+            //We add two to get the correct index because the first slice doesn't include the index
+            neuron = last;
+            first
+        };
+
+        for living_chunk in living {
+            start_index = last_included_cell + 1;
+            last_included_cell = living_chunk.last().unwrap();
+
+            let neuron_chunk = {
+                //# Safety
+                //
+                //The splitting values will only be equal to the length of the chunk at the end,
+                //and so it will always be Some
+                let (fst, lst) = unsafe {
+                    split_or_get(
+                        neuron.unwrap_unchecked(),
+                        last_included_cell - start_index + 1,
+                    )
+                };
+                neuron = lst;
+                fst
+            };
             let resChunk = resChunks.next().unwrap();
+
             scope.execute(move || {
                 let mut rng = thread_rng();
 
-                for (index, cellIndex) in chunk.into_iter().enumerate() {
-                    let movement = unsafe { &mut *pop_ptr.ptr }.getCellMovementData(*cellIndex);
-                    let neurons = unsafe { &mut *pop_ptr.ptr }.getCellMutNeuronData(*cellIndex);
-                    let heritable_data =
-                        unsafe { &mut *pop_ptr.ptr }.getCellHeritableData(*cellIndex);
+                for (index, cellIndex) in living_chunk.iter().enumerate() {
+                    let movement = &movement[*cellIndex];
+                    let heritable_data = &heritable[*cellIndex];
+
+                    let neurons = &mut neuron_chunk[(*cellIndex) - start_index];
 
                     let coords = cell::one_step(
                         neurons,
                         movement,
                         heritable_data.get_header().get_oscillator(),
+                        step,
                         gridWidth,
                         gridHeight,
                         stepsPerGen,
@@ -350,15 +343,17 @@ pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Popula
 
         let mut rng = thread_rng();
 
-        for (index, cellIndex) in localChunk.into_iter().enumerate() {
-            let movement = unsafe { &mut *pop_ptr.ptr }.getCellMovementData(*cellIndex);
-            let neurons = unsafe { &mut *pop_ptr.ptr }.getCellMutNeuronData(*cellIndex);
-            let heritable_data = unsafe { &mut *pop_ptr.ptr }.getCellHeritableData(*cellIndex);
+        for (index, cellIndex) in local_living.iter().enumerate() {
+            let movement = &movement[*cellIndex];
+            let heritable_data = &heritable[*cellIndex];
+
+            let neurons = &mut local_neuron[*cellIndex];
 
             let coords = cell::one_step(
                 neurons,
                 movement,
                 heritable_data.get_header().get_oscillator(),
+                step,
                 gridWidth,
                 gridHeight,
                 stepsPerGen,
@@ -368,15 +363,26 @@ pub fn computeMovements(config: &Config, threadpool: &mut Pool, pop: &mut Popula
         }
     });
 
-    living.len()
+    len
 }
 
+fn split_or_get(
+    data: &mut [NeuronData],
+    index: usize,
+) -> (&mut [NeuronData], Option<&mut [NeuronData]>) {
+    if index == data.len() {
+        (data, None)
+    } else {
+        let (fst, lst) = data.split_at_mut(index);
+        (fst, Some(lst))
+    }
+}
 pub fn determine_reproducers(config: &Config, pop: &Population) -> Vec<usize> {
     let mut reproducers = Vec::new();
     for cellIndex in pop.getLivingIndices() {
         let cell = pop.getCellMovementData(cellIndex);
-        if cell.getCoords().0 < config.getGridWidth() / 4
-            || cell.getCoords().0 > 3 * config.getGridWidth() / 4
+        if cell.getCoords().0 < config.get_grid_width() / 4
+            || cell.getCoords().0 > 3 * config.get_grid_width() / 4
         {
             reproducers.push(cellIndex);
         }
@@ -385,46 +391,43 @@ pub fn determine_reproducers(config: &Config, pop: &Population) -> Vec<usize> {
     reproducers
 }
 
-pub fn determine_deaths(config: &Config, pop: &mut Population) {
-    if unsafe { steps } == config.getStepsPerGen() / 4 {
+pub fn determine_deaths(config: &Config, step: TimeT, pop: &mut Population) {
+    if step == config.get_steps_per_gen() / 4 {
         for index in &pop.getLivingIndices() {
             let (x, _) = pop.getCellMovementData(*index).getCoords();
 
-            if x < config.getGridWidth() / 4 || x > (3 * config.getGridWidth()) / 4 {
+            if x < config.get_grid_width() / 4 || x > (3 * config.get_grid_width()) / 4 {
                 pop.addToDeathQueue(*index)
             }
         }
-    } else if unsafe { steps } == config.getStepsPerGen() / 2 {
+    } else if step == config.get_steps_per_gen() / 2 {
         for index in &pop.getLivingIndices() {
             let (x, _) = pop.getCellMovementData(*index).getCoords();
 
-            if x > config.getGridWidth() / 4 && x < (3 * config.getGridWidth()) / 4 {
+            if x > config.get_grid_width() / 4 && x < (3 * config.get_grid_width()) / 4 {
                 pop.addToDeathQueue(*index)
             }
         }
-    } else if unsafe { steps } == (3 * config.getStepsPerGen()) / 4 {
+    } else if step == (3 * config.get_steps_per_gen()) / 4 {
         for index in &pop.getLivingIndices() {
             let (x, _) = pop.getCellMovementData(*index).getCoords();
 
-            if x < config.getGridWidth() / 4 || x > (3 * config.getGridWidth()) / 4 {
+            if x < config.get_grid_width() / 4 || x > (3 * config.get_grid_width()) / 4 {
                 pop.addToDeathQueue(*index)
             }
         }
     }
 
     if pop.getDeathQueueLen() > 0 {
-        println!(
-            "Step {} Killed: {}",
-            unsafe { steps },
-            pop.getDeathQueueLen()
-        );
+        println!("Step {} Killed: {}", step, pop.getDeathQueueLen());
     }
 }
+
+pub fn save(config: &Config, generation: TimeT, population: &Population) {}
 
 mod DebugCell {
     use std::{
         cell::UnsafeCell,
-        mem::transmute,
         ops::{Deref, DerefMut},
     };
 
@@ -457,7 +460,6 @@ mod DebugCell {
                 if *count == 0 {
                     panic!("Leaked memory!, invalid");
                 } else if *count == 1 {
-                    std::mem::drop(count);
                     *self.counter = RefType::None;
                     return;
                 } else {
@@ -530,16 +532,16 @@ mod DebugCell {
             #[cfg(debug_assertions)]
             match kind {
                 RefType::None => unsafe {
-                    (*&mut *self.refType.get()) = RefType::Immutable(1);
-                    let reference = transmute::<*mut T, &'a T>(self.interior.get());
+                    *self.refType.get() = RefType::Immutable(1);
+                    let reference = &*self.interior.get().cast::<T>();
                     Ref {
                         reference,
                         counter: &mut *self.refType.get(),
                     }
                 },
                 RefType::Immutable(count) => unsafe {
-                    (*&mut *self.refType.get()) = RefType::Immutable(count.checked_add(1).unwrap());
-                    let reference = transmute::<*mut T, &'a T>(self.interior.get());
+                    *self.refType.get() = RefType::Immutable(count.checked_add(1).unwrap());
+                    let reference = &*self.interior.get().cast::<T>();
                     Ref {
                         reference,
                         counter: &mut *self.refType.get(),
@@ -552,7 +554,7 @@ mod DebugCell {
             #[cfg(not(debug_assertions))]
             unsafe {
                 Ref {
-                    reference: transmute::<*mut T, &'a T>(self.interior.get()),
+                    reference: &*self.interior.get().cast::<T>(),
                 }
             }
         }
@@ -566,8 +568,8 @@ mod DebugCell {
             #[cfg(debug_assertions)]
             match kind {
                 RefType::None => unsafe {
-                    (*&mut *self.refType.get()) = RefType::Mutable;
-                    let reference = transmute::<*mut T, &'a mut T>(self.interior.get());
+                    *self.refType.get() = RefType::Mutable;
+                    let reference = &mut *self.interior.get().cast::<T>();
                     RefMut {
                         reference,
                         counter: &mut *self.refType.get(),
@@ -581,7 +583,7 @@ mod DebugCell {
             #[cfg(not(debug_assertions))]
             unsafe {
                 RefMut {
-                    reference: transmute::<*const T, &'a mut T>(self.interior.get()),
+                    reference: &mut *self.interior.get().cast::<T>(),
                 }
             }
         }
@@ -635,8 +637,8 @@ mod DebugCell {
     fn refImmAliasTest() {
         let cell = DebugRefCell::new(0 as usize);
 
-        let x = cell.borrow();
-        let y = cell.borrow();
+        let _x = cell.borrow();
+        let _y = cell.borrow();
 
         cell.borrowMut();
     }
@@ -647,10 +649,10 @@ mod DebugCell {
     fn refMutAliasTest() {
         let cell = DebugRefCell::new(0 as usize);
 
-        let z = cell.borrowMut();
+        let _z = cell.borrowMut();
 
-        let x = cell.borrow();
-        let y = cell.borrow();
+        let _x = cell.borrow();
+        let _y = cell.borrow();
     }
 
     #[test]
@@ -659,8 +661,8 @@ mod DebugCell {
     fn refMultiMut() {
         let cell = DebugRefCell::new(0 as usize);
 
-        let z = cell.borrowMut();
+        let _z = cell.borrowMut();
 
-        let x = cell.borrowMut();
+        let _x = cell.borrowMut();
     }
 }

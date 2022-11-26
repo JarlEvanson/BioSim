@@ -26,18 +26,16 @@ impl Shader {
         let fragmentString =
             std::ffi::CString::new(fragmentString).expect("Failed to convert vertex file data");
 
-        let vertexShader: u32;
-        let fragmentShader: u32;
         let mut success: i32 = 0;
 
         let mut infoLog = vec![0; 512];
 
-        vertexShader = unsafe { gl::CreateShader(gl::VERTEX_SHADER) };
+        let vertexShader = unsafe { gl::CreateShader(gl::VERTEX_SHADER) };
         unsafe {
             gl::ShaderSource(vertexShader, 1, &vertexString.as_ptr(), std::ptr::null());
             gl::CompileShader(vertexShader);
             gl::GetShaderiv(vertexShader, gl::COMPILE_STATUS, &mut success as *mut i32);
-            if !(success == 1) {
+            if success != 1 {
                 gl::GetShaderInfoLog(
                     vertexShader,
                     512,
@@ -59,7 +57,7 @@ impl Shader {
 
         infoLog.clear();
 
-        fragmentShader = unsafe { gl::CreateShader(gl::FRAGMENT_SHADER) };
+        let fragmentShader = unsafe { gl::CreateShader(gl::FRAGMENT_SHADER) };
         unsafe {
             gl::ShaderSource(
                 fragmentShader,
@@ -69,7 +67,7 @@ impl Shader {
             );
             gl::CompileShader(fragmentShader);
             gl::GetShaderiv(fragmentShader, gl::COMPILE_STATUS, &mut success as *mut i32);
-            if !(success == 1) {
+            if success != 1 {
                 gl::GetShaderInfoLog(
                     fragmentShader,
                     512,
@@ -98,7 +96,7 @@ impl Shader {
             gl::AttachShader(ID, fragmentShader);
             gl::LinkProgram(ID);
 
-            if !(success == 1) {
+            if success != 1 {
                 gl::GetProgramInfoLog(ID, 512, std::ptr::null_mut(), infoLog.as_mut_ptr());
                 let mut infoLog = infoLog.clone();
                 let infoLog = Vec::from_raw_parts(
@@ -116,7 +114,7 @@ impl Shader {
             gl::DeleteShader(fragmentShader);
         }
 
-        Shader { ID: ID }
+        Shader { ID }
     }
 
     pub fn apply(&self) {

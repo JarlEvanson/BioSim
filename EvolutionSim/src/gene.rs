@@ -7,6 +7,7 @@ use rand::{prelude::ThreadRng, RngCore};
 
 use crate::neuron::NeuralNet;
 
+#[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct Gene {
     /* Bits 0-15 = Weight -> 16 bits
@@ -176,9 +177,9 @@ impl NodeID {
     }
 
     pub fn from_index(index: usize) -> NodeID {
-        debug_assert!(index < TOTAL_NODE_COUNT);
+        assert!(index < TOTAL_NODE_COUNT);
 
-        unsafe { return std::mem::transmute::<u8, NodeID>(index as u8) }
+        unsafe { NodeID::from_index_unchecked(index) }
     }
 
     #[allow(unused)]
@@ -219,25 +220,15 @@ impl NodeID {
     }
 
     pub const fn is_input(&self) -> bool {
-        if self.to_int() < NodeID::Inner1.to_int() {
-            return true;
-        }
-        return false;
+        self.to_int() < NodeID::Inner1.to_int()
     }
 
     pub const fn is_inner(&self) -> bool {
-        if self.to_int() > NodeID::Oscillator.to_int() && self.to_int() < NodeID::MoveNorth.to_int()
-        {
-            return true;
-        }
-        return false;
+        self.to_int() > NodeID::Oscillator.to_int() && self.to_int() < NodeID::MoveNorth.to_int()
     }
 
     pub const fn is_output(&self) -> bool {
-        if self.to_int() < NodeID::End.to_int() && self.to_int() > NodeID::Inner3.to_int() {
-            return true;
-        }
-        return false;
+        self.to_int() < NodeID::End.to_int() && self.to_int() > NodeID::Inner3.to_int()
     }
 }
 

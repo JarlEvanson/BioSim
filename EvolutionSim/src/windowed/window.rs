@@ -3,6 +3,7 @@
 use std::alloc::{self, Layout};
 use std::ffi::c_void;
 use std::ptr::{self, write};
+use std::rc::Rc;
 use std::{ffi::CString, os::raw::c_char};
 
 use crate::Config;
@@ -10,9 +11,12 @@ use crate::Config;
 extern crate glfw;
 
 use crate::population::Population;
-use crate::{
-    accounted_time, gene::NodeID, neuron_presence, pause, should_reset, windowed::shader::Shader,
-};
+use crate::DebugCell::DebugRefCell;
+use crate::{gene::NodeID, neuron_presence, windowed::shader::Shader};
+
+use super::WindowingStatus;
+
+type UserPointer = (Config, Rc<DebugRefCell<WindowingStatus>>);
 
 #[repr(C)]
 pub struct Window {
@@ -26,7 +30,12 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn createWindow(config: &Config, width: i32, height: i32) -> Option<Window> {
+    pub fn createWindow(
+        config: &Config,
+        windowing_status: &Rc<DebugRefCell<WindowingStatus>>,
+        width: i32,
+        height: i32,
+    ) -> Option<Window> {
         let ptr = unsafe {
             glfw::ffi::glfwInit();
 
@@ -46,7 +55,7 @@ impl Window {
 
             glfw::ffi::glfwSwapInterval(1);
 
-            gl::load_with(|s| loadfn(s));
+            gl::load_with(loadfn);
 
             glfw::ffi::glfwSetWindowCloseCallback(ptr, Some(windowCloseCallback));
 
@@ -54,9 +63,9 @@ impl Window {
 
             glfw::ffi::glfwSetKeyCallback(ptr, Some(keyCallback));
 
-            let layout = Layout::new::<Config>();
-            let configPtr = alloc::alloc(layout) as *mut Config;
-            write(configPtr, config.clone());
+            let layout = Layout::new::<UserPointer>();
+            let configPtr = alloc::alloc(layout) as *mut UserPointer;
+            write(configPtr, (config.clone(), windowing_status.clone()));
 
             glfw::ffi::glfwSetWindowUserPointer(ptr, configPtr as *mut c_void);
 
@@ -69,7 +78,7 @@ impl Window {
         let cell = Shader::new("shaders/cell.vs", "shaders/cell.fs");
 
         let mut window = Window {
-            ptr: ptr,
+            ptr,
             background_VAO: 0,
             cell_VAO: 0,
             horizontal_shader: horizontal,
@@ -107,14 +116,7 @@ impl Window {
                 gl::STATIC_DRAW,
             );
 
-            gl::VertexAttribPointer(
-                0,
-                2,
-                gl::FLOAT,
-                gl::FALSE,
-                2 * 4,
-                0 as *const std::ffi::c_void,
-            );
+            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, 2 * 4, ptr::null());
 
             gl::EnableVertexAttribArray(0);
         }
@@ -145,14 +147,7 @@ impl Window {
             );
 
             gl::EnableVertexAttribArray(0);
-            gl::VertexAttribPointer(
-                0,
-                2,
-                gl::FLOAT,
-                gl::FALSE,
-                2 * 4,
-                0 as *const std::ffi::c_void,
-            );
+            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, 2 * 4, ptr::null());
 
             gl::BindBuffer(gl::ARRAY_BUFFER, 0);
         }
@@ -207,11 +202,11 @@ impl Window {
 
                 for (movement, other) in livingCells {
                     buffer.push(
-                        ((movement.getCoords().0) as f32) / (config.getGridWidth() as f32) * 2.0
+                        ((movement.getCoords().0) as f32) / (config.get_grid_width() as f32) * 2.0
                             - 1.0,
                     );
                     buffer.push(
-                        ((movement.getCoords().1 + 1) as f32) / (config.getGridHeight() as f32)
+                        ((movement.getCoords().1 + 1) as f32) / (config.get_grid_height() as f32)
                             * 2.0
                             - 1.0,
                     );
@@ -228,14 +223,7 @@ impl Window {
                 );
 
                 gl::EnableVertexAttribArray(0);
-                gl::VertexAttribPointer(
-                    0,
-                    2,
-                    gl::FLOAT,
-                    gl::FALSE,
-                    2 * 4,
-                    0 as *const std::ffi::c_void,
-                );
+                gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, 2 * 4, ptr::null());
 
                 gl::EnableVertexAttribArray(1);
                 gl::VertexAttribPointer(
@@ -261,9 +249,9 @@ impl Window {
 
                 self.cell_shader.apply();
                 self.cell_shader
-                    .set_uniform_int("width", config.getGridWidth() as i32);
+                    .set_uniform_int("width", config.get_grid_width() as i32);
                 self.cell_shader
-                    .set_uniform_int("height", config.getGridHeight() as i32);
+                    .set_uniform_int("height", config.get_grid_height() as i32);
 
                 gl::DrawArraysInstanced(gl::TRIANGLES, 0, 6, len as i32);
             }
@@ -274,7 +262,7 @@ impl Window {
 
     #[inline]
     pub fn shouldClose(&self) -> bool {
-        unsafe { return glfw::ffi::glfwWindowShouldClose(self.ptr) == 1 }
+        unsafe { glfw::ffi::glfwWindowShouldClose(self.ptr) == 1 }
     }
 
     #[inline]
@@ -296,7 +284,7 @@ impl Drop for Window {
     fn drop(&mut self) {
         unsafe {
             let ptr = glfw::ffi::glfwGetWindowUserPointer(self.ptr);
-            glfw::ffi::glfwSetWindowUserPointer(self.ptr, 0 as *mut c_void);
+            glfw::ffi::glfwSetWindowUserPointer(self.ptr, ptr::null_mut());
 
             let layout = Layout::new::<Config>();
             alloc::dealloc(ptr as *mut u8, layout);
@@ -318,14 +306,10 @@ extern "C" fn framebufferSizeCallback(
     height: i32,
 ) {
     unsafe {
-        crate::framebuffer_width = width as u32;
-        crate::framebuffer_height = height as u32;
         if width > height {
             gl::Viewport(0, 0, height, height);
-            crate::grid_display_side_length = height as u32;
         } else if height >= width {
             gl::Viewport(0, (height - width) / 2, width, width);
-            crate::grid_display_side_length = width as u32;
         }
     }
 }
@@ -338,35 +322,37 @@ extern "C" fn keyCallback(
     _mods: i32,
 ) {
     if key == glfw::ffi::KEY_R && action == glfw::ffi::PRESS {
-        unsafe {
-            should_reset = true;
-        }
+        let ptr = unsafe { get_window_user_ptr(window) };
+        unsafe { (*ptr).1.borrowMut().should_reset = true };
     } else if key == glfw::ffi::KEY_SPACE && action == glfw::ffi::PRESS {
-        unsafe {
-            pause = !pause;
-        }
+        let ptr = unsafe { get_window_user_ptr(window) };
+        let paused = !unsafe { (*ptr).1.borrow().is_paused };
+        unsafe { (*ptr).1.borrowMut().is_paused = paused };
     } else if key == glfw::ffi::KEY_E && action == glfw::ffi::PRESS {
         print!("\nNeuron Frequencies: \n");
         unsafe {
-            for index in 0..neuron_presence.len() {
-                println!("{}: {}", NodeID::from_index(index), neuron_presence[index]);
+            for (index, count) in neuron_presence.iter().enumerate() {
+                println!("{}: {}", NodeID::from_index(index), *count);
             }
-            println!("");
+            println!();
         }
     } else if key == glfw::ffi::KEY_ESCAPE {
         unsafe { glfw::ffi::glfwSetWindowShouldClose(window, glfw::ffi::TRUE) };
     } else if key == glfw::ffi::KEY_S && action == glfw::ffi::PRESS {
     } else if key == glfw::ffi::KEY_C && action == glfw::ffi::PRESS {
-        let ptr = unsafe { glfw::ffi::glfwGetWindowUserPointer(window) };
+        let ptr = unsafe { get_window_user_ptr(window) };
 
-        if ptr == ptr::null_mut::<c_void>() {
-            todo!()
-        }
-
-        let ptr = ptr as *mut Config;
-
-        println!("\n{}", unsafe { (*ptr).to_string() });
+        println!("\n{}", unsafe { (*ptr).0.to_string() });
     }
+}
+
+unsafe fn get_window_user_ptr(window: *mut glfw::ffi::GLFWwindow) -> *mut UserPointer {
+    let ptr = glfw::ffi::glfwGetWindowUserPointer(window);
+    if ptr.is_null() {
+        todo!()
+    }
+
+    ptr as *mut UserPointer
 }
 
 fn loadfn(symbol: &'static str) -> glfw::ffi::GLFWglproc {
@@ -375,20 +361,22 @@ fn loadfn(symbol: &'static str) -> glfw::ffi::GLFWglproc {
     })
 }
 
-pub fn wait(window: &Window, secs: f64) {
-    while unsafe { glfw::ffi::glfwGetTime() } - unsafe { accounted_time } < secs {
+pub fn wait(
+    window: &Window,
+    windowing_status: &Rc<DebugRefCell<WindowingStatus>>,
+    accounted_time: &mut f64,
+    secs: f64,
+) {
+    while unsafe { glfw::ffi::glfwGetTime() } - *accounted_time < secs {
         window.poll();
         if window.shouldClose() {
             break;
         }
-        if unsafe { pause } {
+        if windowing_status.borrow().is_paused {
             unsafe {
-                accounted_time = glfw::ffi::glfwGetTime();
+                *accounted_time = glfw::ffi::glfwGetTime();
             }
         }
     }
-
-    unsafe {
-        accounted_time += secs;
-    }
+    *accounted_time += secs;
 }

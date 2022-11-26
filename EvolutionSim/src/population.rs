@@ -1,4 +1,4 @@
-use custom_dst::{DstArray, DstData, MaybeUninitDstArray};
+use custom_dst::{DstArray, DstData, DstSliceMut, MaybeUninitDstArray};
 use rand::{thread_rng, Rng};
 
 use crate::{
@@ -25,70 +25,76 @@ pub struct Population {
 
 impl Population {
     pub fn new(config: &Config, grid: &mut Grid) -> Population {
-        let mut movementData = std::boxed::Box::new_uninit_slice(config.getPopSize());
-        let mut neuronData = std::boxed::Box::new_uninit_slice(config.getPopSize());
-        let mut misc_data = Box::new_uninit_slice(config.getPopSize());
+        let mut movement_data = std::boxed::Box::new_uninit_slice(config.get_pop_size());
+        let mut neuron_data = std::boxed::Box::new_uninit_slice(config.get_pop_size());
+        let mut misc_data = Box::new_uninit_slice(config.get_pop_size());
 
-        let mut other_data = MaybeUninitDstArray::new(config.getGenomeSize(), config.getPopSize());
+        let mut other_data =
+            MaybeUninitDstArray::new(config.get_genome_size(), config.get_pop_size());
 
         let mut rng = thread_rng();
 
-        for index in 0..config.getPopSize() {
+        for index in 0..config.get_pop_size() {
             let movement = {
                 let (x, y) = grid.find_random_unoccupied();
 
                 MovementData::new(x, y, Direction::get_random(&mut rng))
             };
-            movementData[index].write(movement);
+            movement_data[index].write(movement);
 
             unsafe {
                 write_random_other_init(
                     &mut other_data,
                     index,
                     &mut rng,
-                    config.getGenomeSize(),
-                    config.getStepsPerGen(),
+                    config.get_genome_size(),
+                    config.get_steps_per_gen(),
                 );
 
                 //SAFETY Safe because we initialized heritable data above
                 let genome = &*other_data.get_footer_ptr(index);
 
-                neuronData[index].write(NeuronData::new(NeuralNet::new(genome)));
+                neuron_data[index].write(NeuronData::new(NeuralNet::new(genome)));
 
                 misc_data[index].write(MiscData::new(genome));
             }
         }
 
-        let (movementData, neuronData, otherData, misc_data) = unsafe {
+        let (movement_data, neuron_data, heritable_data, misc_data) = unsafe {
             (
-                movementData.assume_init(),
-                neuronData.assume_init(),
+                movement_data.assume_init(),
+                neuron_data.assume_init(),
                 other_data.assume_init(),
                 misc_data.assume_init(),
             )
         };
 
         Population {
-            size: config.getPopSize(),
-            movement_data: movementData,
-            neuron_data: neuronData,
-            heritable_data: otherData,
+            size: config.get_pop_size(),
+            movement_data,
+            neuron_data,
+            heritable_data,
             deathQueue: unsafe {
-                std::boxed::Box::new_zeroed_slice(config.getPopSize()).assume_init()
+                std::boxed::Box::new_zeroed_slice(config.get_pop_size()).assume_init()
             },
             deathSize: 0,
             moveQueue: unsafe {
-                std::boxed::Box::new_zeroed_slice(config.getPopSize()).assume_init()
+                std::boxed::Box::new_zeroed_slice(config.get_pop_size()).assume_init()
             },
-            misc_data: misc_data,
+            misc_data,
         }
     }
 
     pub fn genRandom(&mut self, config: &Config, grid: &mut Grid) {
         let mut rng = thread_rng();
-        for index in 0..config.getPopSize() {
-            let movement = {
+
+        let heritable = &mut self.heritable_data.get_mut_slice(0, self.size);
+
+        for index in 0..config.get_pop_size() {
+            self.movement_data[index] = {
                 let (x, y) = grid.find_random_unoccupied();
+
+                grid.set_occupant(x, y, Some(index));
 
                 MovementData {
                     x,
@@ -96,15 +102,13 @@ impl Population {
                     lastMoveDir: Direction::get_random(&mut rng),
                 }
             };
-            self.movement_data[index] = movement;
 
-            let other_data = &mut self.heritable_data.get_mut_slice(0, self.size)[index];
+            gen_random_other(&mut heritable[index], &mut rng, config.get_steps_per_gen());
 
-            gen_random_other(other_data, &mut rng, config.getStepsPerGen());
+            self.neuron_data[index] =
+                NeuronData::new(NeuralNet::new(heritable[index].get_footer()));
 
-            self.misc_data[index] = MiscData::new(other_data.get_footer());
-
-            self.neuron_data[index] = NeuronData::new(NeuralNet::new(other_data.get_footer()));
+            self.misc_data[index] = MiscData::new(heritable[index].get_footer());
         }
     }
 
@@ -119,39 +123,39 @@ impl Population {
         //Old heritable data is now in scratch
         self.heritable_data.swap(scratch);
 
-        let mutationRate = config.getMutationRate();
-        let stepsPerGen = config.getStepsPerGen();
+        let mutationRate = config.get_mutation_rate();
+        let stepsPerGen = config.get_steps_per_gen();
 
         let mut rng = rand::thread_rng();
 
-        let mut new_heritable_data = self.heritable_data.get_mut_slice(0, config.getPopSize());
+        let mut new_heritable_data = self.heritable_data.get_mut_slice(0, config.get_pop_size());
 
-        if reproducingCells.len() > 1 {
-            for index in 0..config.getPopSize() {
-                let selectedCell = reproducingCells[rng.gen_range(0..reproducingCells.len())];
+        for index in 0..config.get_pop_size() {
+            let selectedCell = reproducingCells[rng.gen_range(0..reproducingCells.len())];
 
-                self.movement_data[index] = {
-                    let (x, y) = grid.find_random_unoccupied();
+            self.movement_data[index] = {
+                let (x, y) = grid.find_random_unoccupied();
 
-                    MovementData {
-                        x,
-                        y,
-                        lastMoveDir: Direction::get_random(&mut rng),
-                    }
-                };
+                grid.set_occupant(x, y, Some(index));
 
-                cell::asexuallyReproduce(
-                    &scratch[selectedCell],
-                    &mut new_heritable_data[index],
-                    stepsPerGen,
-                    mutationRate,
-                );
+                MovementData {
+                    x,
+                    y,
+                    lastMoveDir: Direction::get_random(&mut rng),
+                }
+            };
 
-                self.neuron_data[index] =
-                    NeuronData::new(NeuralNet::new(new_heritable_data[index].get_footer()));
+            cell::asexuallyReproduce(
+                &scratch[selectedCell],
+                &mut new_heritable_data[index],
+                stepsPerGen,
+                mutationRate,
+            );
 
-                self.misc_data[index] = MiscData::new(new_heritable_data[index].get_footer());
-            }
+            self.neuron_data[index] =
+                NeuronData::new(NeuralNet::new(new_heritable_data[index].get_footer()));
+
+            self.misc_data[index] = MiscData::new(new_heritable_data[index].get_footer());
         }
     }
 
@@ -178,7 +182,7 @@ impl Population {
     }
 
     pub fn getMutMoveQueue(&mut self) -> &mut [(usize, (GridValueT, GridValueT))] {
-        &mut *self.moveQueue
+        &mut self.moveQueue
     }
 
     //size is the amount of entries to process
@@ -191,11 +195,11 @@ impl Population {
 
                 grid.set_occupant(moverMovementData.x, moverMovementData.y, None);
 
-                if grid.get_occupant(newX, newY) == None {
-                } else if grid.get_occupant(newX, moverMovementData.y) == None {
+                if grid.get_occupant(newX, newY).is_none() {
+                } else if grid.get_occupant(newX, moverMovementData.y).is_none() {
                     //Changes X, but not Y pos
                     newY = moverMovementData.y;
-                } else if grid.get_occupant(moverMovementData.x, newY) == None {
+                } else if grid.get_occupant(moverMovementData.x, newY).is_none() {
                     newX = moverMovementData.x;
                 } else {
                     newX = moverMovementData.x;
@@ -238,11 +242,57 @@ impl Population {
         vec
     }
 
+    pub fn get_data_mut(
+        &mut self,
+    ) -> (
+        &mut [MovementData],
+        &mut [NeuronData],
+        DstSliceMut<HeritableData, Gene>,
+        &mut [MiscData],
+        &mut [(usize, (GridValueT, GridValueT))],
+    ) {
+        (
+            &mut self.movement_data,
+            &mut self.neuron_data,
+            self.heritable_data.get_mut_slice(0, self.size),
+            &mut self.misc_data,
+            &mut self.moveQueue,
+        )
+    }
+
+    pub fn get_movement_data(&self) -> &[MovementData] {
+        &self.movement_data
+    }
+
+    pub fn get_mut_movement_data(&mut self) -> &mut [MovementData] {
+        &mut self.movement_data
+    }
+
+    pub fn get_misc_data(&self) -> &[MiscData] {
+        &self.misc_data
+    }
+
+    pub fn get_mut_misc_data(&mut self) -> &mut [MiscData] {
+        &mut self.misc_data
+    }
+
+    pub fn get_neuron_data(&self) -> &[NeuronData] {
+        &self.neuron_data
+    }
+
+    pub fn get_mut_neuron_data(&mut self) -> &mut [NeuronData] {
+        &mut self.neuron_data
+    }
+
+    pub fn get_mut_heritable_data(&mut self) -> DstSliceMut<HeritableData, Gene> {
+        self.heritable_data.get_mut_slice(0, self.size)
+    }
+
     pub fn getCellMovementData(&self, index: usize) -> &MovementData {
         &self.movement_data[index]
     }
 
-    pub fn getCellHeritableData<'a>(&'a self, index: usize) -> &'a DstData<HeritableData, Gene> {
+    pub fn getCellHeritableData(&self, index: usize) -> &DstData<HeritableData, Gene> {
         self.heritable_data.get_arr_element(index)
     }
 

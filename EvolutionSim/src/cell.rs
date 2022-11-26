@@ -1,3 +1,5 @@
+use std::backtrace::Backtrace;
+
 use custom_dst::{DstData, MaybeUninitDstArray};
 use rand::{rngs::ThreadRng, thread_rng, Rng};
 
@@ -6,9 +8,10 @@ use crate::{
     gene::{Gene, NodeID},
     grid::GridValueT,
     neuron::NeuralNet,
-    steps, TimeT,
+    TimeT,
 };
 
+#[derive(Debug)]
 pub struct MovementData {
     pub x: GridValueT,
     pub y: GridValueT,
@@ -34,8 +37,9 @@ impl MovementData {
     }
 }
 
+#[derive(Debug)]
 pub struct NeuronData {
-    neural_net: NeuralNet,
+    pub neural_net: NeuralNet,
 }
 
 impl NeuronData {
@@ -44,6 +48,7 @@ impl NeuronData {
     }
 }
 
+#[derive(Debug)]
 pub struct MiscData {
     pub color: (u8, u8, u8),
     pub isAlive: bool,
@@ -58,7 +63,7 @@ impl MiscData {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct HeritableData {
     oscillatorPeriod: TimeT,
 }
@@ -66,14 +71,6 @@ pub struct HeritableData {
 impl HeritableData {
     pub fn get_oscillator(&self) -> usize {
         self.oscillatorPeriod
-    }
-}
-
-impl Default for HeritableData {
-    fn default() -> Self {
-        Self {
-            oscillatorPeriod: Default::default(),
-        }
     }
 }
 
@@ -112,8 +109,6 @@ pub unsafe fn write_random_other_init(
         }
     }
 
-    drop(gene_ptr);
-
     array.write_header(
         arr_index,
         HeritableData {
@@ -134,16 +129,14 @@ pub fn sexuallyReproduce(
 
     for (index, gene) in cell_loc.get_mut_footer().iter_mut().enumerate() {
         if rng.gen_bool(0.5) {
-            if rng.gen_range(0.0 as f32..100.0) < mutationRate {
-                let bit = rng.gen_range(0..32 as u32);
+            if rng.gen_range(0.0..100.0f32) < mutationRate {
+                let bit = rng.gen_range(0..32u32);
 
                 *gene = heritable_data_1.get_footer()[index] ^ (1 << (bit & 31));
             }
-        } else {
-            if rng.gen_range(0.0 as f32..100.0) < mutationRate {
-                let bit = rng.gen_range(0..32 as u32);
-                *gene = heritable_data_2.get_footer()[index] ^ (1 << (bit & 31));
-            }
+        } else if rng.gen_range(0.0..100.0f32) < mutationRate {
+            let bit = rng.gen_range(0..32u32);
+            *gene = heritable_data_2.get_footer()[index] ^ (1 << (bit & 31));
         }
     }
 
@@ -155,9 +148,9 @@ pub fn sexuallyReproduce(
         *oscillator = heritable_data_2.get_header().oscillatorPeriod;
     }
 
-    if rng.gen_range(0.0 as f32..100.0) < mutationRate {
-        let bit = thread_rng().gen_range(0..32 as u32);
-        *oscillator = *oscillator ^ (1 << (bit & 31));
+    if rng.gen_range(0.0f32..100.0) < mutationRate {
+        let bit = thread_rng().gen_range(0..32u32);
+        *oscillator ^= (1 << (bit & 31));
     }
 
     *oscillator = normalize_oscillator(*oscillator, stepsPerGen);
@@ -178,8 +171,8 @@ pub fn asexuallyReproduce(
         .copy_from_slice(heritable_data.get_footer());
 
     for i in cell_loc.get_mut_footer() {
-        if rng.gen_range(0.0 as f32..100.0) < mutationRate {
-            let bit = rng.gen_range(0..32 as u32);
+        if rng.gen_range(0.0f32..100.0) < mutationRate {
+            let bit = rng.gen_range(0..32u32);
 
             *i = Gene::new(i.gene ^ (1 << (bit & 31)));
         }
@@ -187,9 +180,9 @@ pub fn asexuallyReproduce(
 
     let oscillator = &mut cell_loc.get_header_mut().oscillatorPeriod;
 
-    if rng.gen_range(0.0 as f32..100.0) < mutationRate {
-        let bit = thread_rng().gen_range(0..32 as u32);
-        *oscillator = *oscillator ^ (1 << (bit & 31));
+    if rng.gen_range(0.0..100.0f32) < mutationRate {
+        let bit = thread_rng().gen_range(0..32u32);
+        *oscillator ^= 1 << (bit & 31);
     }
 
     *oscillator = normalize_oscillator(*oscillator, stepsPerGen);
@@ -199,6 +192,7 @@ pub fn one_step(
     neuron_data: &mut NeuronData,
     movement_data: &MovementData,
     oscillator: TimeT,
+    step: TimeT,
     gridWidth: GridValueT,
     gridHeight: GridValueT,
     stepsPerGen: TimeT,
@@ -207,8 +201,8 @@ pub fn one_step(
     let values = [
         (2 * movement_data.x) as f32 / (gridWidth as f32) - 1.0,
         (2 * movement_data.y) as f32 / (gridHeight as f32) - 1.0,
-        unsafe { steps } as f32 / (stepsPerGen as f32),
-        ((((((unsafe { steps } as f32) / (oscillator as f32)) as i32) % 2) * 2) - 1) as f32,
+        step as f32 / (stepsPerGen as f32),
+        ((((((step as f32) / (oscillator as f32)) as i32) % 2) * 2) - 1) as f32,
     ];
     neuron_data.neural_net.prepare_net(&values);
     neuron_data.neural_net.feed_forward();
@@ -258,7 +252,7 @@ pub fn one_step(
         x = gridWidth - 1;
     }
 
-    if (thread_rng().gen_range(0..i32::MAX) as f32) / (i32::MAX as f32) < prob_y.abs() {
+    if (rng.gen_range(0..i32::MAX) as f32) / (i32::MAX as f32) < prob_y.abs() {
         if prob_y > 0.0 {
             y += 1;
         } else {
@@ -355,7 +349,10 @@ impl Direction {
             (-1, -1) => Direction::SouthWest,
             (-1, 0) => Direction::West,
             (-1, 1) => Direction::NorthWest,
-            (_, _) => unimplemented!(),
+            (_, _) => {
+                println!("{}", Backtrace::force_capture());
+                unimplemented!();
+            }
         }
     }
 
