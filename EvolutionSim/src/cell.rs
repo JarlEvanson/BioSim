@@ -181,7 +181,7 @@ pub fn asexuallyReproduce(
     let oscillator = &mut cell_loc.get_header_mut().oscillatorPeriod;
 
     if rng.gen_range(0.0..100.0f32) < mutationRate {
-        let bit = thread_rng().gen_range(0..32u32);
+        let bit = rng.gen_range(0..32u32);
         *oscillator ^= 1 << (bit & 31);
     }
 
